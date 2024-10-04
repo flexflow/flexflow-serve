@@ -17,6 +17,7 @@
 #include "flexflow/inference.h"
 #include "flexflow/parallel_ops/parallel_op.h"
 // #include "flexflow/tokenizers.h"
+#include "suffix_decoding.h"
 #include <bitset>
 #include <cmath>
 #include <cstdio>
