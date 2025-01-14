@@ -181,6 +181,7 @@ public:
   bool *position_bias;
   float scaling_factor;
   void *devQKVProjArray, *keyCache, *valueCache;
+  void *queryTmp, *outputTmp;
   void *qk_prods, *qk_prods_softmax;
   void *attn_heads;
   BatchConfig::PerTokenInfo *token_infos;

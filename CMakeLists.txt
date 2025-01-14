@@ -468,7 +468,7 @@ if(NOT BUILD_LEGION_ONLY)
   
   if (INFERENCE_TESTS)
     target_link_libraries(flexflow "${TORCH_LIBRARIES}")
-    set_property(TARGET flexflow PROPERTY CXX_STANDARD 14)
+    # set_property(TARGET flexflow PROPERTY CXX_STANDARD 14)
   endif()
 
   if(FF_BUILD_UNIT_TESTS)
