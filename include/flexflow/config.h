@@ -93,7 +93,7 @@ struct FFHandler {
   cudnnHandle_t dnn;
   cublasHandle_t blas;
   cublasLtHandle_t blasLt;
-  Internal::GemmEngine *gemm_engine;
+  // Internal::GemmEngine *gemm_engine;
 #else
   miopenHandle_t dnn;
   hipblasHandle_t blas;

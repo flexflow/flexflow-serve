@@ -166,11 +166,20 @@ FFHandler
   } else {
     handle.offload_reserve_space = nullptr;
   }
+  // std::cout << "handle.batch_config_metadata_size: "
+  //           << handle.batch_config_metadata_size << std::endl;
+  // std::cout << "handle.incr_attention_metadata->mem_size(): "
+  //           << handle.incr_attention_metadata->mem_size() << std::endl;
+  // std::cout << "handle.tree_search_attention_metadata->mem_size(): "
+  //           << handle.tree_search_attention_metadata->mem_size() << std::endl;
+  // std::cout << "handle.tree_verify_attention_metadata->mem_size(): "
+  //           << handle.tree_verify_attention_metadata->mem_size() << std::endl;
+  // std::cout << "handle.gemm_engine->workspace_size: "
+  //           << handle.gemm_engine->workspace_size << std::endl;
   if (handle.batch_config_metadata_size +
       handle.incr_attention_metadata->mem_size() +
       handle.tree_search_attention_metadata->mem_size() +
-      handle.tree_verify_attention_metadata->mem_size() +
-      handle.gemm_engine->workspace_size > 0) {
+      handle.tree_verify_attention_metadata->mem_size()) {
     // allocate memory for offload reserve space
     Memory gpu_mem = get_proc_mem(Machine::get_machine(), task->target_proc);
     Realm::Rect<1, coord_t> bounds(
@@ -178,8 +187,7 @@ FFHandler
         Realm::Point<1, coord_t>(handle.batch_config_metadata_size +
             handle.incr_attention_metadata->mem_size() +
             handle.tree_search_attention_metadata->mem_size() +
-            handle.tree_verify_attention_metadata->mem_size() +
-            handle.gemm_engine->workspace_size - 1));
+            handle.tree_verify_attention_metadata->mem_size() - 1));
     std::vector<size_t> field_sizes;
     field_sizes.push_back(sizeof(char));
     Realm::RegionInstance workspaceInst;
@@ -204,19 +212,19 @@ FFHandler
                             handle.incr_attention_metadata->mem_size() +
                             handle.tree_search_attention_metadata->mem_size()),
         handle.tree_verify_attention_metadata->mem_size());
-    handle.gemm_engine->assign_workspace(
-        static_cast<void *>(static_cast<char *>(ptr) +
-                            handle.batch_config_metadata_size +
-                            handle.incr_attention_metadata->mem_size() +
-                            handle.tree_search_attention_metadata->mem_size() +
-                            handle.tree_verify_attention_metadata->mem_size()),
-        handle.gemm_engine->workspace_size);
+    // handle.gemm_engine->assign_workspace(
+    //     static_cast<void *>(static_cast<char *>(ptr) +
+    //                         handle.batch_config_metadata_size +
+    //                         handle.incr_attention_metadata->mem_size() +
+    //                         handle.tree_search_attention_metadata->mem_size() +
+    //                         handle.tree_verify_attention_metadata->mem_size()),
+    //     handle.gemm_engine->workspace_size);
   } else {
     handle.batch_config_metadata = nullptr;
     handle.incr_attention_metadata->assign_address(nullptr, 0);
     handle.tree_search_attention_metadata->assign_address(nullptr, 0);
     handle.tree_verify_attention_metadata->assign_address(nullptr, 0);
-    handle.gemm_engine->assign_workspace(nullptr, 0);
+    // handle.gemm_engine->assign_workspace(nullptr, 0);
   }
 // checkCUDA(cudaMalloc(&handle.workSpace, handle.workSpaceSize));
 #ifdef FF_USE_NCCL
