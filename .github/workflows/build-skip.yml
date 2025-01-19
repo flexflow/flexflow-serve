@@ -18,17 +18,11 @@ concurrency:
 
 jobs:
   cmake-build:
-    name: Build FlexFlow with CMake
+    name: Build FlexFlow Serve with CMake
     runs-on: ubuntu-20.04
     strategy:
       matrix:
         gpu_backend: ["cuda", "hip_rocm"]
       fail-fast: false
-    steps:
-      - run: 'echo "No build required"'
-
-  makefile-build:
-    name: Build FlexFlow with the Makefile
-    runs-on: ubuntu-20.04
     steps:
       - run: 'echo "No build required"'

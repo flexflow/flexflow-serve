@@ -82,7 +82,7 @@ jobs:
     if: ${{ ( github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.ref_name == 'inference' }}
     strategy:
       matrix:
-        hip_version: ["5.3", "5.4", "5.5", "5.6"]
+        hip_version: ["5.6"]
       fail-fast: false
     env:
       FF_GPU_BACKEND: "hip_rocm"
@@ -114,7 +114,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        cuda_version: ["11.1", "11.6", "11.7", "11.8", "12.0", "12.1", "12.2"]
+        cuda_version: ["11.8", "12.0", "12.1", "12.2"]
       fail-fast: false
     env:
       FF_GPU_BACKEND: "cuda"
@@ -187,4 +187,4 @@ jobs:
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
-          curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"Weekly FlexFlow Docker images build failed! <https://github.com/flexflow/FlexFlow/actions/runs/$GITHUB_RUN_ID|(See here).> :x: \"}" $SLACK_WEBHOOK
+          curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"Weekly FlexFlow Docker images build failed! <https://github.com/flexflow/flexflow-serve/actions/runs/$GITHUB_RUN_ID|(See here).> :x: \"}" $SLACK_WEBHOOK

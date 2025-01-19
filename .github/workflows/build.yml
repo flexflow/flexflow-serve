@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   cmake-build:
-    name: Build FlexFlow with CMake
+    name: Build FlexFlow Serve with CMake
     runs-on: ubuntu-20.04
     defaults:
       run:
@@ -64,14 +64,14 @@ jobs:
       - name: Install system dependencies
         run: .github/workflows/helpers/install_dependencies.sh
 
-      - name: Install conda and FlexFlow dependencies
+      - name: Install conda and FlexFlow Serve dependencies
         uses: conda-incubator/setup-miniconda@v2
         with:
           activate-environment: flexflow
           environment-file: conda/flexflow.yml
           auto-activate-base: false
 
-      - name: Build FlexFlow
+      - name: Build FlexFlow Serve
         run: |
           export CUDNN_DIR="$CUDA_PATH"
           export CUDA_DIR="$CUDA_PATH"
@@ -98,7 +98,7 @@ jobs:
           ../config/config.linux
           make -j $n_build_cores
 
-      - name: Install FlexFlow
+      - name: Install FlexFlow Serve
         run: |
           export CUDNN_DIR="$CUDA_PATH"
           export CUDA_DIR="$CUDA_PATH"
@@ -140,51 +140,3 @@ jobs:
           # Remove build folder to check that the installed version can run independently of the build files
           rm -rf build
           python -c "import flexflow.core; import flexflow.serve as ff; exit()"
-
-  makefile-build:
-    name: Build FlexFlow with the Makefile
-    runs-on: ubuntu-20.04
-    defaults:
-      run:
-        shell: bash -l {0} # required to use an activated conda environment
-    steps:
-      - name: Checkout Git Repository
-        uses: actions/checkout@v3
-        with:
-          submodules: recursive
-
-      - name: Free additional space on runner
-        run: .github/workflows/helpers/free_space_on_runner.sh
-
-      - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.16
-        id: cuda-toolkit
-        with:
-          cuda: "12.1.1"
-          use-github-cache: "false"
-          log-file-suffix: 'makefile_${{matrix.gpu_backend}}.txt'
-
-      - name: Install system dependencies
-        run: .github/workflows/helpers/install_dependencies.sh
-
-      - name: Install conda and FlexFlow dependencies
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          activate-environment: flexflow
-          environment-file: conda/flexflow.yml
-          auto-activate-base: false
-
-      - name: Build FlexFlow
-        run: |
-          export CUDNN_DIR="$CUDA_PATH"
-          export CUDA_DIR="$CUDA_PATH"
-          export LD_LIBRARY_PATH="$CUDA_PATH/lib64/stubs:$LD_LIBRARY_PATH"
-          sudo ln -s "$CUDA_PATH/lib64/stubs/libcuda.so" "$CUDA_PATH/lib64/stubs/libcuda.so.1"
-          export FF_HOME=$(pwd)
-          cores_available=$(nproc --all)
-          n_build_cores=$(( cores_available -1 ))
-          if (( $n_build_cores < 1 )) ; then n_build_cores=1 ; fi
-
-          cd python
-          make -j $n_build_cores
-          python -c 'import flexflow.core'
