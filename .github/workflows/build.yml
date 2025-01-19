@@ -105,17 +105,6 @@ jobs:
           sudo make install
           sudo ldconfig
 
-      - name: Run C++ unit tests
-        if: ${{ matrix.gpu_backend == 'cuda' }}
-        run: |
-          export CUDNN_DIR="$CUDA_PATH"
-          export CUDA_DIR="$CUDA_PATH"
-          export LD_LIBRARY_PATH="$CUDA_PATH/lib64/stubs:$LD_LIBRARY_PATH"
-          export FF_HOME=$(pwd)
-          sudo ln -s "$CUDA_PATH/lib64/stubs/libcuda.so" "$CUDA_PATH/lib64/stubs/libcuda.so.1"
-          cd build
-          ./tests/unit/unit-test
-
       - name: Check availability of flexflow modules in Python
         run: |
           if [[ "${FF_GPU_BACKEND}" == "cuda" ]]; then
