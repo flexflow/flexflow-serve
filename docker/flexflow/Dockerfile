@@ -2,16 +2,16 @@ ARG FF_GPU_BACKEND "cuda"
 ARG gpu_backend_version ""
 FROM flexflow-environment-$FF_GPU_BACKEND$gpu_backend_version:latest
 
-LABEL org.opencontainers.image.source=https://github.com/flexflow/FlexFlow
-LABEL org.opencontainers.image.description="FlexFlow container"
+LABEL org.opencontainers.image.source=https://github.com/flexflow/flexflow-serve
+LABEL org.opencontainers.image.description="flexflow-serve container"
 
-# Copy FlexFlow repository
-RUN mkdir FlexFlow
-ENV FF_HOME /usr/FlexFlow
+# Copy flexflow-serve repository
+RUN mkdir flexflow-serve
+ENV FF_HOME /usr/flexflow-serve
 WORKDIR ${FF_HOME}
 COPY . .
 
-# Args to build FlexFlow
+# Args to build flexflow-serve
 ARG BUILD_CONFIGS
 ARG N_BUILD_CORES
 
@@ -24,7 +24,7 @@ RUN for pair in $BUILD_CONFIGS; do \
         fi; \
     done
 
-# Build and install C++ and Python versions of FlexFlow
+# Build and install C++ and Python versions of flexflow-serve
 RUN mkdir -p build && cd build && \
     eval "$BUILD_CONFIGS" ../config/config.linux && \
     make -j $N_BUILD_CORES install && \

@@ -446,22 +446,6 @@ if(NOT BUILD_LEGION_ONLY)
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       COMMENT "Creating flexflow_cffi_header.py..."
     )
-    if (NOT FF_BUILD_FROM_PYPI)
-      # generate the Legion Python bindings library. When building from pip, we need to do this post-install to prevent Legion from overwriting the path to the Legion shared library
-      add_custom_command(TARGET flexflow
-        POST_BUILD	
-        COMMAND CMAKE_BUILD_DIR=${Legion_BINARY_DIR}/runtime CMAKE_INSTALL_PREFIX=${Legion_BINARY_DIR} ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/deps/legion/bindings/python/setup.py build --build-lib=${Legion_BINARY_DIR}/bindings/python ${Legion_PYTHON_EXTRA_INSTALL_ARGS}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/deps/legion/bindings/python
-      )
-      # create flexflow_python interpreter. When building from pip, we install the FF_HOME/python/flexflow_python script instead.
-      add_custom_command(TARGET flexflow
-        PRE_BUILD	
-        COMMAND ${Python_EXECUTABLE} ${FLEXFLOW_ROOT}/python/flexflow_python_build.py --build-dir ${CMAKE_BINARY_DIR}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Creating flexflow_python interpreter..."
-      )
-      install(PROGRAMS ${CMAKE_BINARY_DIR}/flexflow_python DESTINATION "bin")
-    endif()
   endif()
   
   if (INFERENCE_TESTS)
