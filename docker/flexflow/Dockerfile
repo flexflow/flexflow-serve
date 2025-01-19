@@ -1,5 +1,5 @@
-ARG FF_GPU_BACKEND "cuda"
-ARG gpu_backend_version ""
+ARG FF_GPU_BACKEND=cuda
+ARG gpu_backend_version=12.1
 FROM flexflow-environment-$FF_GPU_BACKEND$gpu_backend_version:latest
 
 LABEL org.opencontainers.image.source=https://github.com/flexflow/flexflow-serve
@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.description="flexflow-serve container"
 
 # Copy flexflow-serve repository
 RUN mkdir flexflow-serve
-ENV FF_HOME /usr/flexflow-serve
+ENV FF_HOME=/usr/flexflow-serve
 WORKDIR ${FF_HOME}
 COPY . .
 
