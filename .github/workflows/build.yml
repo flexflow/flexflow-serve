@@ -81,14 +81,6 @@ jobs:
           export hip_version=5.6
           export FF_BUILD_INFERENCE=ON
 
-          if [[ "${FF_GPU_BACKEND}" == "cuda" ]]; then
-            export FF_BUILD_TRAINING_EXAMPLES=ON
-            export FF_BUILD_UNIT_TESTS=ON
-          else 
-            export FF_BUILD_TRAINING_EXAMPLES=OFF
-            export FF_BUILD_UNIT_TESTS=OFF
-          fi
-
           cores_available=$(nproc --all)
           n_build_cores=$(( cores_available -1 ))
           if (( $n_build_cores < 1 )) ; then n_build_cores=1 ; fi
@@ -107,14 +99,6 @@ jobs:
           export FF_HIP_ARCH=gfx1100,gfx1036
           export hip_version=5.6
           export FF_BUILD_INFERENCE=ON
-          
-          if [[ "${FF_GPU_BACKEND}" == "cuda" ]]; then
-            export FF_BUILD_TRAINING_EXAMPLES=ON
-            export FF_BUILD_UNIT_TESTS=ON
-          else 
-            export FF_BUILD_TRAINING_EXAMPLES=OFF
-            export FF_BUILD_UNIT_TESTS=OFF
-          fi
 
           cd build
           ../config/config.linux
