@@ -565,7 +565,7 @@ void RequestManager::init_suffix_tree(std::string const &trace_filepath,
     std::vector<int> encoded = this->tokenizer_->Encode(entry.response);
     training_dataset.push_back(encoded);
   }
-  suffix_tree = new SuffixTree(training_dataset, suffix_tree_max_depth);
+  suffix_tree = new SuffixTree<int>(training_dataset);
 }
 
 RequestManager::RequestGuid
@@ -820,7 +820,7 @@ void RequestManager::insert_completed_request_into_suffix_tree(
       request.tokens.end() - request.decode_length(), request.tokens.end());
   assert(output_tokens.size() == request.decode_length());
   if (output_tokens.size() > 0) {
-    suffix_tree->insert(output_tokens);
+    suffix_tree->add_entry(output_tokens);
   }
   long long int end_time = Realm::Clock::current_time_in_microseconds();
   assert(profiling.tree_operation_step_times.size() > 0);
@@ -1107,7 +1107,7 @@ bool RequestManager::update_llm_prefill_results(InferenceResult const &result) {
             assert(request->prompt_tree == nullptr && "Prompt tree was already initialized");
             assert(this->suffix_tree_max_depth > 0 && "Invalid max depth for suffix tree");
             assert(request->tokens.size() > 0 && "Attempting to create prompt tree for empty request");
-            request->prompt_tree = new SuffixTree({request->tokens}, this->suffix_tree_max_depth);
+            request->prompt_tree = new SuffixTree<int>({request->tokens});
           }
 
           if (decoding_mode == SPECULATIVE_DECODING) {
