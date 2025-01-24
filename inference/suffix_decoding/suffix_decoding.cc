@@ -46,7 +46,8 @@ struct ModelMeta {
   std::string llm_weights_path;
   std::string llm_model_config_path;
 
-  int bos_token_id, eos_token_id;
+  int bos_token_id;
+  std::vector<int> eos_token_ids;
 };
 
 void parse_input_args(char **argv,
@@ -226,10 +227,21 @@ void get_model_meta(FilePaths &file_paths,
       llm_model_config.find("bos_token_id") == llm_model_config.end()
           ? -1
           : (int)llm_model_config.at("bos_token_id");
-  model_metadata.eos_token_id =
-      llm_model_config.find("eos_token_id") == llm_model_config.end()
-          ? -1
-          : (int)llm_model_config.at("eos_token_id");
+  // model_metadata.eos_token_id =
+  //     llm_model_config.find("eos_token_id") == llm_model_config.end()
+  //         ? -1
+  //         : (int)llm_model_config.at("eos_token_id");
+  if (llm_model_config.find("eos_token_id") != llm_model_config.end()) {
+    if (llm_model_config["eos_token_id"].is_array()) {
+      for (auto &eos_token_id : llm_model_config["eos_token_id"]) {
+        model_metadata.eos_token_ids.push_back(eos_token_id);
+      }
+    } else {
+      model_metadata.eos_token_ids.push_back(llm_model_config["eos_token_id"]);
+    }
+  } else {
+    model_metadata.eos_token_ids.push_back(-1);
+  }
 
   assert(model_metadata.llm_model_type != ModelType::UNKNOWN &&
          "Invalid LLM model type passed (or no type was passed).");
@@ -383,7 +395,7 @@ void FlexFlow::top_level_task(Task const *task,
   rm->set_streaming_cache(false);
   rm->register_tokenizer(model_metadata.llm_model_type,
                          model_metadata.bos_token_id,
-                         model_metadata.eos_token_id,
+                         model_metadata.eos_token_ids,
                          model_metadata.llm_tokenizer_path);
   rm->set_decoding_mode(decoding_mode);
   rm->set_slo_violation_early_termination(false);

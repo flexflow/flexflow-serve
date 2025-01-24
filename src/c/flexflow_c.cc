@@ -2711,7 +2711,7 @@ void flexflow_request_manager_register_tokenizer(
          "Cannot convert nullptr char * to std::string");
   std::string const tokenizer_filepath_str(tokenizer_filepath);
   handle->register_tokenizer(
-      model_type, bos_token_id, eos_token_id, tokenizer_filepath_str);
+      model_type, bos_token_id, {eos_token_id}, tokenizer_filepath_str);
   DEBUG_PRINT(
       "[RequestManager] register tokenizer %p %s", handle, tokenizer_filepath);
 }

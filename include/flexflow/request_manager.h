@@ -365,7 +365,7 @@ public:
   int register_ssm_model(FFModel *model);
   void register_tokenizer(ModelType model_type,
                           int bos_token_id,
-                          int eos_token_id,
+                          std::vector<int> eos_token_ids,
                           std::string const &path);
   std::vector<int32_t> tokenize(std::string const &text);
   void register_output_filepath(std::string const &);
@@ -397,6 +397,7 @@ public:
   static void terminate_background_server_at_exit();
   // Methods to check and mark request completion
   void trigger_request_completion_future(RequestGuid const &guid);
+  bool is_eos_token(TokenId token_id);
   static void background_serving_task(
       Legion::Task const *task,
       std::vector<Legion::PhysicalRegion> const &regions,
@@ -491,7 +492,7 @@ private:
   bool verbose;
   ModelType model_type;
   int bos_token_id;
-  int eos_token_id;
+  std::vector<int> eos_token_ids;
   bool old_llama_tokenizer = false;
   std::string output_filepath, csv_filepath;
   std::queue<Request> pending_request_queue;
