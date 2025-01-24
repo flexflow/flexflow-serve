@@ -1170,7 +1170,7 @@ bool RequestManager::update_llm_decode_results(InferenceResult const &result) {
     nb_requests_decoded++;
 
     NewProfileInfo new_profile_info;
-    new_profile_info.timestamp = Realm::Clock::current_time_in_microseconds();
+    new_profile_info.timestamp = current_time;
     new_profile_info.request_guid = guid;
     new_profile_info.request_step_idx = profiling_requests[guid].llm_decoding_steps-1;
     new_profile_info.num_generated_tokens = 1;
@@ -1425,6 +1425,8 @@ BatchConfig RequestManager::prepare_decoding_batch() {
             std::begin(bc.request_available));
   bc.num_available_requests = num_available_requests;
 
+  long long int current_time = Realm::Clock::current_time_in_microseconds();
+
   for (int request_index = 0; request_index < get_max_requests_per_batch();
        request_index++) {
     if (!request_available[request_index]) {
@@ -1454,8 +1456,7 @@ BatchConfig RequestManager::prepare_decoding_batch() {
     bc.num_tokens++;
 
     if (profiling_requests[request.guid].llm_decoding_steps == 0) {
-      profiling_requests[request.guid].start_decoding_time =
-          Realm::Clock::current_time_in_microseconds();
+      profiling_requests[request.guid].start_decoding_time = current_time;
     }
   }
 
@@ -1463,7 +1464,7 @@ BatchConfig RequestManager::prepare_decoding_batch() {
     std::cout << "prepare_decoding_batch NEW batchconfig:" << std::endl;
     bc.print();
   }
-  profiling.llm_step_start = Realm::Clock::current_time_in_microseconds();
+  profiling.llm_step_start = current_time;
   return bc;
 }
 /* ----- Speculative Inference Specific functions ----- */
@@ -1491,6 +1492,7 @@ BatchConfig RequestManager::prepare_first_spec_batch_config() {
             std::begin(new_bc.request_available));
   new_bc.num_available_requests = num_available_requests;
 
+  long long ssm_step_start_time = Realm::Clock::current_time_in_microseconds();
   for (int request_index = 0; request_index < get_max_requests_per_batch();
        ++request_index) {
     if (!request_available[request_index]) {
@@ -1576,10 +1578,9 @@ BatchConfig RequestManager::prepare_first_spec_batch_config() {
     new_bc.streamingCacheInfo[request_index] = request.streaming_cache_info;
 
     if (profiling_requests[guid].ssm_decoding_steps == 0) {
-      profiling_requests[guid].start_decoding_time =
-          Realm::Clock::current_time_in_microseconds();
+      profiling_requests[guid].start_decoding_time = ssm_step_start_time;
     }
-    profiling.ssm_step_start = Realm::Clock::current_time_in_microseconds();
+    profiling.ssm_step_start = ssm_step_start_time;
   }
 
   if (!spec_infer_old_version) {
@@ -1986,11 +1987,20 @@ BatchConfig RequestManager::prepare_suffix_decoding_batch_config() {
     new_bc.streamingCacheInfo[request_index] = request.streaming_cache_info;
 
     if (profiling_requests[request.guid].llm_decoding_steps == 0) {
-      profiling_requests[request.guid].start_decoding_time = Realm::Clock::current_time_in_microseconds();
+      profiling_requests[request.guid].start_decoding_time = start_time;
     }
   }
   long long int end_time = Realm::Clock::current_time_in_microseconds();
   profiling.tree_operation_step_times.push_back((double)(end_time - start_time) * 1e-3);
+
+  for (int request_index = 0; request_index < get_max_requests_per_batch(); ++request_index) {
+    if (!request_available[request_index]) {
+      continue;
+    }
+    int guid = guid_of_requests[request_index];
+    profiling_requests[guid].speculation_start_timestamp = start_time;
+    profiling_requests[guid].speculation_end_timestamp = end_time;
+  }
 
   if (verbose) {
     std::cout << "prepare_suffix_decoding_batch_config NEW batchconfig:"
@@ -2232,6 +2242,7 @@ bool RequestManager::update_ssm_inference_results(
     add_tokens_to_spec_token_tree_old_version(ssm_inference_result);
   }
 
+  long long ssm_end_time = Realm::Clock::current_time_in_microseconds();
   for (int request_index = 0; request_index < get_max_requests_per_batch();
        ++request_index) {
     if (!request_available[request_index]) {
@@ -2261,7 +2272,7 @@ bool RequestManager::update_ssm_inference_results(
     if (current_ssm_step == ssm_tree_depth) {
       assert(profiling_requests[guid].ssm_decoding_steps % ssm_tree_depth == 0);
       profiling_requests[guid].speculation_start_timestamp = profiling.ssm_step_start;
-      profiling_requests[guid].speculation_end_timestamp = Realm::Clock::current_time_in_microseconds();
+      profiling_requests[guid].speculation_end_timestamp = ssm_end_time;
     }
   }
 
@@ -2272,10 +2283,7 @@ bool RequestManager::update_ssm_inference_results(
       prune_token_tree();
     }
     // Update profiling statistics before returning
-    profiling.ssm_step_times.push_back(
-        (Realm::Clock::current_time_in_microseconds() -
-         profiling.ssm_step_start) *
-        1e-3);
+    profiling.ssm_step_times.push_back((ssm_end_time - profiling.ssm_step_start) * 1e-3);
     profiling.ssm_steps.push_back(current_ssm_step);
     return true;
   }
@@ -2643,6 +2651,7 @@ void RequestManager::get_verify_results_greedy(
   // This function maintain the generated token list of the request and the
   // committed tokens.
   int total_nb_generated_tokens = 0;
+  long long current_time = Realm::Clock::current_time_in_microseconds();
   for (int request_index = 0; request_index < get_max_requests_per_batch();
        ++request_index) {
     if (!request_available[request_index]) {
@@ -2760,7 +2769,7 @@ void RequestManager::get_verify_results_greedy(
     
 
     NewProfileInfo new_profile_info;
-    new_profile_info.timestamp = Realm::Clock::current_time_in_microseconds();
+    new_profile_info.timestamp = current_time;
     new_profile_info.request_guid = guid;
     new_profile_info.request_step_idx = profiling_requests[guid].llm_decoding_steps-1; // check if this has already been incremented
     new_profile_info.num_speculated_tokens = get_tree_size(request);
@@ -2795,6 +2804,7 @@ void RequestManager::get_verify_results_suffix_decoding(
     std::cout << llm_verify_result << std::endl;
   }
   int total_nb_generated_tokens = 0;
+  long long current_time = Realm::Clock::current_time_in_microseconds();
   for (int request_index = 0; request_index < get_max_requests_per_batch();
        ++request_index) {
     if (!request_available[request_index]) {
@@ -2915,7 +2925,7 @@ void RequestManager::get_verify_results_suffix_decoding(
     }
 
     NewProfileInfo new_profile_info;
-    new_profile_info.timestamp = Realm::Clock::current_time_in_microseconds();
+    new_profile_info.timestamp = current_time;
     new_profile_info.request_guid = guid;
     new_profile_info.request_step_idx = profiling_requests[guid].llm_decoding_steps-1;
     new_profile_info.num_speculated_tokens = (int)request.suffix_decoding_best_token_ids.size();
