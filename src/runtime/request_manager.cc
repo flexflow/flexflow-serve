@@ -2177,6 +2177,7 @@ bool RequestManager::update_llm_suffix_decoding_results(
   bool request_completed = false;
 
   // Iterate over the requests
+  long long tree_update_time = 0;
   for (int request_index = 0; request_index < get_max_requests_per_batch();
        ++request_index) {
     if (!request_available[request_index]) {
@@ -2213,7 +2214,10 @@ bool RequestManager::update_llm_suffix_decoding_results(
     if (eos_token_found or request.decode_length() >= get_max_output_length() or
         request.tokens.size() >= get_max_sequence_length()) {
       if (get_suffix_tree_online_tree_update()) {
+        long long int start = Realm::Clock::current_time_in_microseconds();
         insert_completed_request_into_suffix_tree(request_index);
+        long long int end = Realm::Clock::current_time_in_microseconds();
+        tree_update_time += (end - start);
       }
       // Request is completed
       request_update_attainment(request_index, attained);
@@ -2228,6 +2232,24 @@ bool RequestManager::update_llm_suffix_decoding_results(
     } else {
       // update_bitmask_prompt(guid, request.committed_tokens.size() - 1);
     }
+  }
+
+  int idx=0;
+  for (int request_index = 0; request_index < get_max_requests_per_batch(); ++request_index) {
+    if (!request_available[request_index]) {
+      // Request in this slot is unavailable
+      continue;
+    }
+    int guid = guid_of_requests[request_index];
+    
+    // check that the new_profiling_info.size()-nb_requests_decoded + idx has request_guid == guid
+    assert(new_profiling_info.size() - nb_requests_decoded + idx < new_profiling_info.size() >= 0);
+    assert(new_profiling_info.size() - nb_requests_decoded + idx < new_profiling_info.size());
+    assert(new_profiling_info[new_profiling_info.size()-nb_requests_decoded + idx].request_guid == guid);
+
+    new_profiling_info[new_profiling_info.size()-nb_requests_decoded + idx].suffix_tree_update_time = tree_update_time;
+
+    idx++;
   }
 
   // Some requests may be completed after appending the verified tokens.
@@ -2937,6 +2959,9 @@ void RequestManager::get_verify_results_suffix_decoding(
     new_profile_info.timestamp = current_time;
     new_profile_info.request_guid = guid;
     new_profile_info.request_step_idx = profiling_requests[guid].llm_decoding_steps-1;
+    new_profile_info.speculation_start_timestamp = profiling_requests[guid].speculation_start_timestamp;
+    new_profile_info.speculation_end_timestamp = profiling_requests[guid].speculation_end_timestamp;
+    new_profile_info.suffix_tree_update_time = 0;
     new_profile_info.num_speculated_tokens = (int)request.suffix_decoding_best_token_ids.size();
     new_profile_info.num_accepted_tokens = accepted_tokens;
     new_profile_info.prefix_length = request.suffix_decoding_best_prefix_length;

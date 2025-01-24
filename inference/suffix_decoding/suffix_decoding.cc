@@ -719,7 +719,7 @@ void FlexFlow::top_level_task(Task const *task,
   }
   */
 
-  std::string header = "llm,partition,max_tree_depth,online_tree_update,matching_strategy,max_requests_per_batch,max_tokens_per_batch,request_guid,request_step_idx,timestamp,num_speculated_tokens,num_accepted_tokens,prefix_length,speculation_score,num_generated_tokens";  
+  std::string header = "llm,partition,max_tree_depth,online_tree_update,matching_strategy,max_requests_per_batch,max_tokens_per_batch,request_guid,request_step_idx,timestamp,speculation_start_timestamp,speculation_end_timestamp,tree_update_time,num_speculated_tokens,num_accepted_tokens,prefix_length,speculation_score,num_generated_tokens";  
   // csv filepath
   // create csv filepath and add header if it doesn't exist
   
@@ -755,6 +755,9 @@ void FlexFlow::top_level_task(Task const *task,
     file << info.request_guid << "," 
           << info.request_step_idx << ","
           << info.timestamp << ","
+          << info.speculation_start_timestamp << ","
+          << info.speculation_end_timestamp << ","
+          << info.suffix_tree_update_time << ","
           << info.num_speculated_tokens << ","
           << info.num_accepted_tokens << ","
           << info.prefix_length << ","

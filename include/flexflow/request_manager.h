@@ -248,6 +248,7 @@ struct NewProfileInfo {
   int num_generated_tokens;
   long long speculation_start_timestamp;
   long long speculation_end_timestamp;
+  long long suffix_tree_update_time;
 };
 struct RequestProfileInfo {
   int llm_prefilling_steps = 0;
