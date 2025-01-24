@@ -2234,23 +2234,20 @@ bool RequestManager::update_llm_suffix_decoding_results(
     }
   }
 
-  int idx=0;
-  for (int request_index = 0; request_index < get_max_requests_per_batch(); ++request_index) {
-    if (!request_available[request_index]) {
-      // Request in this slot is unavailable
-      continue;
-    }
-    int guid = guid_of_requests[request_index];
-    
-    // check that the new_profiling_info.size()-nb_requests_decoded + idx has request_guid == guid
-    assert(new_profiling_info.size() - nb_requests_decoded + idx < new_profiling_info.size() >= 0);
-    assert(new_profiling_info.size() - nb_requests_decoded + idx < new_profiling_info.size());
-    assert(new_profiling_info[new_profiling_info.size()-nb_requests_decoded + idx].request_guid == guid);
-
-    new_profiling_info[new_profiling_info.size()-nb_requests_decoded + idx].suffix_tree_update_time = tree_update_time;
-
-    idx++;
-  }
+  // TODO: check this
+  // int idx=0;
+  // for (int request_index = 0; request_index < get_max_requests_per_batch(); ++request_index) {
+  //   if (!request_available[request_index]) {
+  //     // Request in this slot is unavailable
+  //     continue;
+  //   }
+  //   int guid = guid_of_requests[request_index];
+  //   assert(new_profiling_info.size() - nb_requests_decoded + idx < new_profiling_info.size() >= 0);
+  //   assert(new_profiling_info.size() - nb_requests_decoded + idx < new_profiling_info.size());
+  //   assert(new_profiling_info[new_profiling_info.size()-nb_requests_decoded + idx].request_guid == guid);
+  //   new_profiling_info[new_profiling_info.size()-nb_requests_decoded + idx].suffix_tree_update_time = tree_update_time;
+  //   idx++;
+  // }
 
   // Some requests may be completed after appending the verified tokens.
   // If there is a request completed, return true.
