@@ -2718,7 +2718,7 @@ void flexflow_request_manager_register_tokenizer(
          "Cannot convert nullptr char * to std::string");
   std::string const tokenizer_filepath_str(tokenizer_filepath);
   handle->register_tokenizer(
-      model_type, bos_token_id, eos_token_id, tokenizer_filepath_str);
+      model_type, bos_token_id, {eos_token_id}, tokenizer_filepath_str);
   DEBUG_PRINT(
       "[RequestManager] register tokenizer %p %s", handle, tokenizer_filepath);
 }
@@ -2838,5 +2838,7 @@ void flexflow_file_data_loader_load_weights(flexflow_file_data_loader_t handle_,
                                             flexflow_model_t model_handle_) {
   FileDataLoader *handle = FFCObjectWrapper::unwrap(handle_);
   FFModel *model = FFCObjectWrapper::unwrap(model_handle_);
-  handle->load_weights(model);
+  Context ctx = model->config.lg_ctx;
+  Runtime *runtime = model->config.lg_hlr;
+  handle->load_weights_parallel(model, ctx, runtime);
 }

@@ -61,8 +61,8 @@ public:
                        std::vector<Legion::PhysicalRegion> const &regions,
                        Legion::Context ctx,
                        Legion::Runtime *runtime);
-  static void nccl_update_task_gpu(Context ctx,
-                                   Runtime *runtime,
+  static void nccl_update_task_gpu(Legion::Context ctx,
+                                   Legion::Runtime *runtime,
                                    SGDOptimizer const *op,
                                    OpMeta const *meta,
                                    float const *w_grad_ptr,
@@ -106,8 +106,8 @@ public:
                        std::vector<Legion::PhysicalRegion> const &regions,
                        Legion::Context ctx,
                        Legion::Runtime *runtime);
-  static void nccl_update_task_gpu(Context ctx,
-                                   Runtime *runtime,
+  static void nccl_update_task_gpu(Legion::Context ctx,
+                                   Legion::Runtime *runtime,
                                    AdamOptimizer const *op,
                                    OpMeta const *meta,
                                    float const *w_grad_ptr,

@@ -58,9 +58,13 @@ void parse_input_args(char **argv,
                       double &baseline_latency_ms,
                       double &ssm_spec_latency_ms,
                       double &llm_verify_latency_ms,
+                      double &slo_filter,
+                      int &replica,
                       double &request_per_second,
                       std::string &emission_file_path,
-                      bool &add_special_tokens) {
+                      bool &add_special_tokens,
+                      bool &fcfs_slo,
+                      bool &stta) {
   for (int i = 1; i < argc; i++) {
     // llm model type
     if (!strcmp(argv[i], "-llm-model")) {
@@ -163,6 +167,14 @@ void parse_input_args(char **argv,
       llm_verify_latency_ms = std::stod(argv[++i]);
       continue;
     }
+    if (!strcmp(argv[i], "--eval-slo-filter")) {
+      slo_filter = std::stod(argv[++i]);
+      continue;
+    }
+    if (!strcmp(argv[i], "--eval-replica")) {
+      replica = std::stoi(argv[++i]);
+      continue;
+    }
     if (!strcmp(argv[i], "--request-per-second")) {
       request_per_second = std::stod(argv[++i]);
       continue;
@@ -173,6 +185,14 @@ void parse_input_args(char **argv,
     }
     if (!strcmp(argv[i], "--no-special-tokens")) {
       add_special_tokens = false;
+      continue;
+    }
+    if (!strcmp(argv[i], "--fcfs-serving")) {
+      fcfs_slo = true;
+      continue;
+    }
+    if (!strcmp(argv[i], "--stta-serving")) {
+      stta = true;
       continue;
     }
   }
@@ -218,8 +238,12 @@ void FlexFlow::top_level_task(Task const *task,
   double baseline_latency_ms = 50;
   double ssm_spec_latency_ms = 20;
   double llm_verify_latency_ms = 50;
+  double slo_filter = 0.0;
+  int replica = 1;
   double request_per_second = 1.0;
   bool add_special_tokens = true;
+  bool fcfs_slo = false;
+  bool stta = false;
   std::string emission_file_path;
 
   InputArgs const &command_args = HighLevelRuntime::get_input_args();
@@ -247,14 +271,21 @@ void FlexFlow::top_level_task(Task const *task,
                    baseline_latency_ms,
                    ssm_spec_latency_ms,
                    llm_verify_latency_ms,
+                   slo_filter,
+                   replica,
                    request_per_second,
                    emission_file_path,
-                   add_special_tokens);
+                   add_special_tokens,
+                   fcfs_slo,
+                   stta);
   if (max_tokens_per_ssm_batch == -1) {
     max_tokens_per_ssm_batch = max_tokens_per_batch;
   }
   if (max_tokens_per_prefilling_batch == -1) {
     max_tokens_per_prefilling_batch = max_tokens_per_batch;
+  }
+  if (slo_filter == 0.0) {
+    replica = 1;
   }
 
   assert(ffconfig.data_parallelism_degree * ffconfig.tensor_parallelism_degree *
@@ -283,7 +314,8 @@ void FlexFlow::top_level_task(Task const *task,
   ModelType model_type = ModelType::UNKNOWN;
   auto architectures = model_config["architectures"];
   for (auto const &str : architectures) {
-    if (str == "LlamaForCausalLM" || str == "LLaMAForCausalLM") {
+    if (str == "LlamaForCausalLM" || str == "LLaMAForCausalLM" ||
+        str == "MistralForCausalLM") {
       model_type = ModelType::LLAMA;
       break;
     } else if (str == "OPTForCausalLM") {
@@ -303,9 +335,21 @@ void FlexFlow::top_level_task(Task const *task,
   int bos_token_id = model_config.find("bos_token_id") == model_config.end()
                          ? -1
                          : (int)model_config.at("bos_token_id");
-  int eos_token_id = model_config.find("eos_token_id") == model_config.end()
-                         ? -1
-                         : (int)model_config.at("eos_token_id");
+  // int eos_token_id = model_config.find("eos_token_id") == model_config.end()
+  //                        ? -1
+  //                        : (int)model_config.at("eos_token_id");
+  std::vector<int> eos_token_ids;
+  if (model_config.find("eos_token_id") != model_config.end()) {
+    if (model_config["eos_token_id"].is_array()) {
+      for (auto &eos_token_id : model_config["eos_token_id"]) {
+        eos_token_ids.push_back(eos_token_id);
+      }
+    } else {
+      eos_token_ids.push_back(model_config["eos_token_id"]);
+    }
+  } else {
+    eos_token_ids.push_back(-1);
+  }
 
   assert(model_type != ModelType::UNKNOWN &&
          "Invalid LLM model type passed (or no type was passed).");
@@ -329,8 +373,10 @@ void FlexFlow::top_level_task(Task const *task,
   rm->set_max_tree_width(16);
   rm->set_verbose(verbose);
   rm->set_streaming_cache(streaming_cache);
+  rm->set_fcfs_slo(fcfs_slo);
+  rm->set_stta(stta);
   rm->register_tokenizer(
-      model_type, bos_token_id, eos_token_id, tokenizer_filepath);
+      model_type, bos_token_id, eos_token_ids, tokenizer_filepath);
   rm->register_output_filepath(file_paths.output_file_path);
 
   FFModel model(ffconfig, ffconfig.cpu_offload);
@@ -425,10 +471,16 @@ void FlexFlow::top_level_task(Task const *task,
       std::vector<double> timestamps, ratios;
       for (auto const &json_obj : trace_json) {
         EmissionTrace trace(json_obj);
-        requests.push_back(
-            GenerationRequest(trace.prompt, -1.0, 0, add_special_tokens));
-        timestamps.push_back(trace.emission_time_ms);
-        ratios.push_back(trace.slo_ratio);
+        if (slo_filter != 0.0 &&
+            std::fabs(trace.slo_ratio - slo_filter) > 1e-6) {
+          continue;
+        }
+        for (size_t i = 0; i < replica; ++i) {
+          requests.push_back(
+              GenerationRequest(trace.prompt, -1.0, 0, add_special_tokens));
+          timestamps.push_back(trace.emission_time_ms);
+          ratios.push_back(trace.slo_ratio);
+        }
       }
       TraceEmissionMachine emission_machine(timestamps, ratios);
       results = model.generate(requests, emission_machine);

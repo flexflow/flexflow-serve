@@ -3393,6 +3393,7 @@ void FFModel::create_operators_from_layers() {
                config.tensor_parallelism_degree > 1 &&
                (l->op_type == OP_INC_MULTIHEAD_SELF_ATTENTION ||
                 l->op_type == OP_TREE_INC_MULTIHEAD_SELF_ATTENTION ||
+                l->op_type == OP_SPEC_INC_MULTIHEAD_SELF_ATTENTION ||
                 // mlp layer
                 is_mlp_block(layer_idx) ||
                 // llama mlp layer
@@ -4106,6 +4107,7 @@ struct DefaultConfig {
   static int const epochs = 1;
   // const static int iterations = 1;
   static int const batchSize = 64;
+  static bool const log_instance_creation = false;
   static bool const profiling = false;
   static bool const benchmarking = false;
   static bool const inference_debugging = false;
@@ -4143,6 +4145,7 @@ FFConfig::FFConfig() {
   // iterations = DefaultConfig::iterations;
   batchSize = DefaultConfig::batchSize;
   profiling = DefaultConfig::profiling;
+  log_instance_creation = DefaultConfig::log_instance_creation;
   benchmarking = DefaultConfig::benchmarking;
   inference_debugging = DefaultConfig::inference_debugging;
   learningRate = DefaultConfig::learningRate;
@@ -4328,6 +4331,10 @@ void FFConfig::parse_args(char **argv, int argc) {
     }
     if (!strcmp(argv[i], "-ll:cpu")) {
       cpusPerNode = atoi(argv[++i]);
+      continue;
+    }
+    if ((!strcmp(argv[i], "--log-instance-creation"))) {
+      log_instance_creation = true;
       continue;
     }
     if (!strcmp(argv[i], "--profiling")) {
@@ -4530,6 +4537,20 @@ void register_flexflow_internal_tasks(Runtime *runtime,
         registrar.global_registration = false;
       }
       runtime->register_task_variant<RequestManager::background_serving_task>(
+          registrar);
+    }
+  }
+  {
+    TaskVariantRegistrar registrar(LOAD_WEIGHT_TASK_ID, "load_weight_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (pre_register) {
+      Runtime::preregister_task_variant<FileDataLoader::load_weight_task>(
+          registrar, "load_weight_task");
+    } else {
+      if (enable_control_replication) {
+        registrar.global_registration = false;
+      }
+      runtime->register_task_variant<FileDataLoader::load_weight_task>(
           registrar);
     }
   }
@@ -6431,7 +6452,6 @@ void register_flexflow_internal_tasks(Runtime *runtime,
     TaskVariantRegistrar registrar(FUSEDOP_INIT_TASK_ID, "FusedOp Init");
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     registrar.set_leaf();
-    registrar.set_concurrent();
     if (pre_register) {
       Runtime::preregister_task_variant<OpMeta *, FusedOp::init_task>(
           registrar, "FusedOp Init Task");
@@ -6670,7 +6690,6 @@ void register_flexflow_internal_tasks(Runtime *runtime,
     TaskVariantRegistrar registrar(ALLREDUCE_INIT_TASK_ID, "AllReduce Init");
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     registrar.set_leaf();
-    registrar.set_concurrent();
     if (pre_register) {
       Runtime::preregister_task_variant<OpMeta *, AllReduce::init_task>(
           registrar, "AllReduce init Task");
@@ -6722,7 +6741,6 @@ void register_flexflow_internal_tasks(Runtime *runtime,
     registrar.set_leaf();
     // AllReduce forward and backward must run concurrentluy since they
     // use ncclAllReduce internally
-    registrar.set_concurrent();
     if (pre_register) {
       Runtime::preregister_task_variant<AllReduce::backward_task>(
           registrar, "AllReduce Backward Task");

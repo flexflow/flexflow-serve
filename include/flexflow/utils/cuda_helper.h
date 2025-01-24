@@ -3,6 +3,7 @@
 #include "flexflow/accessor.h"
 #include "flexflow/ffconst.h"
 #include "legion.h"
+#include <cublasLt.h>
 #include <cublas_v2.h>
 #include <cudnn.h>
 #ifdef FF_USE_NCCL

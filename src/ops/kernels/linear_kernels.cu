@@ -40,7 +40,7 @@ LinearMeta::LinearMeta(FFHandler handler,
   }
   // Allocate an all-one's vector
   gpu_mem_allocator.create_legion_instance(
-      reserveInst, data_type_size(data_type) * batch_size);
+      reserveInst, data_type_size(data_type) * batch_size, "LinearMeta");
   one_ptr = gpu_mem_allocator.allocate_instance_untyped(
       data_type_size(data_type) * batch_size);
   int parallelism = batch_size;
@@ -323,6 +323,10 @@ void forward_kernel(LinearMeta const *m,
                                    : ff_to_cuda_datatype(m->weight_type[0]);
   cudaDataType_t output_type = ff_to_cuda_datatype(m->output_type[0]);
   assert(input_type == weight_type && weight_type == output_type);
+  DT const *input_p = static_cast<DT const *>(input_ptr),
+           *weight_p =
+               static_cast<DT const *>(m->offload ? m->weight_ptr : weight_ptr);
+  DT *output_p = static_cast<DT *>(output_ptr);
 #if defined(CUDA_VERSION) && (CUDA_VERSION < 11000)
   cudaDataType_t compute_type = cublas_data_type;
 #else
@@ -334,25 +338,20 @@ void forward_kernel(LinearMeta const *m,
     compute_type = CUBLAS_COMPUTE_32F_FAST_16F;
   }
 #endif
-  checkCUDA(cublasGemmEx(m->handle.blas,
-                         CUBLAS_OP_T,
-                         CUBLAS_OP_N,
-                         out_dim,
-                         batch_size,
-                         in_dim,
-                         &alpha,
-                         m->offload ? m->weight_ptr : weight_ptr,
-                         weight_type,
-                         in_dim,
-                         input_ptr,
-                         input_type,
-                         in_dim,
-                         &beta,
-                         output_ptr,
-                         output_type,
-                         out_dim,
-                         compute_type,
-                         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  m->handle.gemm_engine->gemm_internal(CUBLAS_OP_T,
+                                       CUBLAS_OP_N,
+                                       out_dim,
+                                       batch_size,
+                                       in_dim,
+                                       alpha,
+                                       weight_p,
+                                       in_dim,
+                                       input_p,
+                                       in_dim,
+                                       beta,
+                                       output_p,
+                                       out_dim,
+                                       stream);
   // use_bias = True
   if (bias_ptr != NULL) {
     // fuse bias and relu

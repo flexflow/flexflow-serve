@@ -161,7 +161,8 @@ ArgMaxMeta::ArgMaxMeta(FFHandler handler,
            ? sizeof(cub::KeyValuePair<int, float>) * batch_size
            : sizeof(cub::KeyValuePair<int, half>) * batch_size) +
       prob_size * sizeof(float);
-  gpu_mem_allocator.create_legion_instance(reserveInst, total_size);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, total_size, "ArgMaxMeta");
   d_offsets = gpu_mem_allocator.allocate_instance<int>(d_offsets_size);
   d_out = data_type == DT_FLOAT
               ? gpu_mem_allocator.allocate_instance_untyped(
@@ -200,7 +201,8 @@ ArgMaxMeta::ArgMaxMeta(FFHandler handler,
         stream));
   }
 
-  gpu_mem_allocator.create_legion_instance(reserveInst, temp_storage_bytes);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, temp_storage_bytes, "ArgMaxMeta");
   d_temp_storage =
       gpu_mem_allocator.allocate_instance_untyped(temp_storage_bytes);
 }

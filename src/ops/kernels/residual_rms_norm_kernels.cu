@@ -13,6 +13,11 @@
  * limitations under the License.
  */
 
+#include "flashinfer/utils.cuh"
+#include <numeric>
+
+#include "flashinfer/math.cuh"
+#include "flashinfer/vec_dtypes.cuh"
 #include "flexflow/ffconst_utils.h"
 #include "flexflow/ops/kernels/residual_rms_norm_kernels.h"
 #include "flexflow/ops/residual_rms_norm.h"
@@ -43,7 +48,8 @@ ResidualRMSNormMeta::ResidualRMSNormMeta(FFHandler handler,
   size_t rms_ptr_size = batch_size;
   size_t norm_ptr_size = num_elements;
   size_t totalSize = (rms_ptr_size + norm_ptr_size) * data_type_size(data_type);
-  gpu_mem_allocator.create_legion_instance(reserveInst, totalSize);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, totalSize, "ResidualRMSNormMeta");
   rms_ptr = gpu_mem_allocator.allocate_instance_untyped(
       rms_ptr_size * data_type_size(data_type));
   norm_ptr = gpu_mem_allocator.allocate_instance_untyped(
@@ -55,89 +61,133 @@ ResidualRMSNormMeta::~ResidualRMSNormMeta(void) {
   }
 }
 
+// Adopted from flashinfer
+// (https://github.com/flashinfer-ai/flashinfer/blob/main/include/flashinfer/norm.cuh)
+// Main modification is for non-inplace computation
+template <uint32_t VEC_SIZE, typename T>
+__global__ void FusedAddRMSNormKernel(T const *__restrict__ input,
+                                      T const *__restrict__ residual,
+                                      T const *__restrict__ weight,
+                                      T *__restrict__ output,
+                                      T *__restrict__ residual_output,
+                                      const uint32_t d,
+                                      float eps) {
+  const uint32_t bx = blockIdx.x;
+  const uint32_t tx = threadIdx.x, ty = threadIdx.y;
+  constexpr uint32_t warp_size = 32;
+  const uint32_t num_warps = blockDim.y;
+  const uint32_t thread_id = tx + ty * warp_size;
+  const uint32_t num_threads = num_warps * warp_size;
+  const uint32_t rounds = flashinfer::ceil_div(d, VEC_SIZE * num_threads);
+  extern __shared__ float smem[];
+
+  float sum_sq = 0.f;
+
+  for (uint32_t i = 0; i < rounds; i++) {
+    flashinfer::vec_t<T, VEC_SIZE> input_vec;
+    flashinfer::vec_t<T, VEC_SIZE> residual_vec;
+    flashinfer::vec_t<T, VEC_SIZE> residual_output_vec;
+    input_vec.fill(0);
+    residual_vec.fill(0);
+    residual_output_vec.fill(0);
+    if ((i * num_threads + thread_id) * VEC_SIZE < d) {
+      input_vec.load(input + bx * d + i * num_threads * VEC_SIZE +
+                     thread_id * VEC_SIZE);
+      residual_vec.load(residual + bx * d + i * num_threads * VEC_SIZE +
+                        thread_id * VEC_SIZE);
+    }
+#pragma unroll
+    for (uint32_t j = 0; j < VEC_SIZE; j++) {
+      float x = float(input_vec[j]);
+      x += float(residual_vec[j]);
+      sum_sq += x * x;
+      residual_output_vec[j] = (T)x;
+    }
+    if ((i * num_threads + thread_id) * VEC_SIZE < d) {
+      residual_output_vec.store(residual_output + bx * d +
+                                i * num_threads * VEC_SIZE +
+                                thread_id * VEC_SIZE);
+    }
+  }
+
+  // first, warp reduce sum
+#pragma unroll
+  for (uint32_t offset = warp_size / 2; offset > 0; offset /= 2) {
+    sum_sq += flashinfer::math::shfl_xor_sync(sum_sq, offset);
+  }
+
+  smem[ty] = sum_sq;
+  __syncthreads();
+  // then, cross warp reduce sum using only the first warp
+  if (ty == 0) {
+    sum_sq = (tx < num_warps) ? smem[tx] : 0.f;
+#pragma unroll
+    for (uint32_t offset = warp_size / 2; offset > 0; offset /= 2) {
+      sum_sq += flashinfer::math::shfl_xor_sync(sum_sq, offset);
+    }
+    smem[0] = sum_sq;
+  }
+  __syncthreads();
+
+  float rms_rcp = flashinfer::math::rsqrt(smem[0] / float(d) + eps);
+
+  for (uint32_t i = 0; i < rounds; i++) {
+    flashinfer::vec_t<T, VEC_SIZE> weight_vec;
+    flashinfer::vec_t<T, VEC_SIZE> residual_output_vec;
+    flashinfer::vec_t<T, VEC_SIZE> output_vec;
+    weight_vec.fill(0);
+    residual_output_vec.fill(0);
+    output_vec.fill(0);
+    if ((i * num_threads + thread_id) * VEC_SIZE < d) {
+      weight_vec.load(weight + i * num_threads * VEC_SIZE +
+                      thread_id * VEC_SIZE);
+      residual_output_vec.load(residual_output + bx * d +
+                               i * num_threads * VEC_SIZE +
+                               thread_id * VEC_SIZE);
+    }
+#pragma unroll
+    for (uint32_t j = 0; j < VEC_SIZE; j++) {
+      output_vec[j] =
+          float(residual_output_vec[j]) * rms_rcp * float(weight_vec[j]);
+    }
+    if ((i * num_threads + thread_id) * VEC_SIZE < d) {
+      output_vec.store(output + bx * d + i * num_threads * VEC_SIZE +
+                       thread_id * VEC_SIZE);
+    }
+  }
+}
+
+template <typename T>
+cudaError_t FusedAddRMSNorm(T const *input,
+                            T const *residual,
+                            T const *weight,
+                            T *output,
+                            T *residual_output,
+                            uint32_t batch_size,
+                            uint32_t d,
+                            float eps = 1e-5,
+                            cudaStream_t stream = 0) {
+  const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
+
+  const uint32_t block_size = std::min<uint32_t>(1024, d / vec_size);
+  const uint32_t num_warps = flashinfer::ceil_div(block_size, 32);
+  dim3 nblks(batch_size);
+  dim3 nthrs(32, num_warps);
+  const uint32_t smem_size = num_warps * sizeof(float);
+  void *args[] = {
+      &input, &residual, &weight, &output, &residual_output, &d, &eps};
+
+  DISPATCH_ALIGNED_VEC_SIZE(vec_size, VEC_SIZE, {
+    auto kernel = FusedAddRMSNormKernel<VEC_SIZE, T>;
+    FLASHINFER_CUDA_CALL(cudaLaunchKernel(
+        (void *)kernel, nblks, nthrs, args, smem_size, stream));
+  });
+
+  return cudaSuccess;
+}
+
 namespace Kernels {
 namespace ResidualRMSNorm {
-
-template <typename T>
-__device__ __forceinline__ T WARP_SHFL_DOWN(T value,
-                                            unsigned int delta,
-                                            int width = warpSize,
-                                            unsigned int mask = 0xffffffff) {
-#ifndef __HIP_PLATFORM_HCC__
-  return __shfl_down_sync(mask, value, delta, width);
-#else
-  return __shfl_down(value, delta, width);
-#endif
-}
-
-template <typename T>
-__inline__ __device__ T WarpReduceSum(T val) {
-#pragma unroll
-  for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
-    val += WARP_SHFL_DOWN(val, offset);
-  }
-  return val;
-}
-
-template <typename T>
-__inline__ __device__ T BlockReduceSum(T val, T *shared, int max_num_threads) {
-  int const lid = threadIdx.x % C10_WARP_SIZE;
-  int const wid = threadIdx.x / C10_WARP_SIZE;
-  val = WarpReduceSum(val);
-  __syncthreads();
-  if (lid == 0) {
-    shared[wid] = val;
-  }
-  __syncthreads();
-  val = (threadIdx.x < (min(blockDim.x, max_num_threads) / C10_WARP_SIZE))
-            ? shared[lid]
-            : T(0);
-  if (wid == 0) {
-    val = WarpReduceSum(val);
-  }
-  return val;
-}
-
-template <typename T>
-__global__ void ResidualRMSNormFusedForwardKernel(int64_t N,
-                                                  float eps,
-                                                  T const *X1,
-                                                  T const *X2,
-                                                  T *X_out,
-                                                  T *rms,
-                                                  T *Y,
-                                                  T const *weights,
-                                                  T *output) {
-  __shared__ float v_shared[C10_WARP_SIZE];
-  int64_t const i = blockIdx.x;
-  float sum = 0.0f;
-  for (int64_t j = threadIdx.x; j < N;
-       j += min(blockDim.x, kCUDABlockReduceNumThreads)) {
-    int64_t const index = i * N + j;
-    X_out[index] = X1[index] + X2[index];
-    sum +=
-        (static_cast<float>(X_out[index]) * static_cast<float>(X_out[index]));
-  }
-  sum = BlockReduceSum<float>(
-      sum,
-      v_shared,
-      min(blockDim.x,
-          kCUDABlockReduceNumThreads)); // use BlockReduceSum() to sum X_ij^2
-
-  if (threadIdx.x == 0) {
-    rms[i] = static_cast<T>(rsqrt((sum / static_cast<float>(N)) + eps));
-  }
-
-  __syncthreads();
-
-  using T_ACC = T;
-  for (int64_t j = threadIdx.x; j < N; j += min(blockDim.x, kCUDANumThreads)) {
-    const int64_t index = i * N + j;
-    Y[index] = static_cast<T_ACC>(X_out[index]) * static_cast<T_ACC>(rms[i]);
-    output[index] = Y[index] * weights[index % N];
-  }
-}
-
 template <typename T>
 void forward_kernel(ResidualRMSNormMeta const *m,
                     T const *input1_ptr,
@@ -159,16 +209,15 @@ void forward_kernel(ResidualRMSNormMeta const *m,
   int num_threads =
       std::max(kernel1_parallelism.second, kernel2_parallelism.second);
 
-  ResidualRMSNormFusedForwardKernel<T>
-      <<<num_blocks, num_threads, 0, stream>>>(m->in_dim,
-                                               m->eps,
-                                               input1_ptr,
-                                               input2_ptr,
-                                               residual_output_ptr,
-                                               static_cast<T *>(m->rms_ptr),
-                                               static_cast<T *>(m->norm_ptr),
-                                               weight_ptr,
-                                               output_ptr);
+  checkCUDA(FusedAddRMSNorm<T>(input1_ptr,
+                               input2_ptr,
+                               weight_ptr,
+                               output_ptr,
+                               residual_output_ptr,
+                               batch_size,
+                               m->in_dim,
+                               m->eps,
+                               stream));
 }
 
 void forward_kernel_wrapper(ResidualRMSNormMeta const *m,

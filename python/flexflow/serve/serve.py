@@ -28,7 +28,6 @@ from flexflow.serve.models import (
 )
 from flexflow.core import *
 from transformers import AutoConfig, AutoModelForCausalLM
-from peft import PeftModel, PeftConfig, LoraConfig
 from huggingface_hub import HfApi
 import sys, torch, shutil, hashlib
 from typing import Union, List
@@ -96,6 +95,7 @@ class LLM:
         self.supported_models = {
             "LlamaForCausalLM": (ModelType.LLAMA, FlexFlowLLAMA, LLAMAConfig),
             "LLaMAForCausalLM": (ModelType.LLAMA, FlexFlowLLAMA, LLAMAConfig),
+            "MistralForCausalLM": (ModelType.LLAMA, FlexFlowLLAMA, LLAMAConfig),
             "OPTForCausalLM": (ModelType.OPT, FlexFlowOPT, OPTConfig),
             "RWForCausalLM": (ModelType.FALCON, FlexFlowFalcon, FalconConfig),
             "FalconForCausalLM": (ModelType.FALCON, FlexFlowFalcon, FalconConfig),
@@ -272,7 +272,7 @@ class LLM:
                 f"'{self.model_name}' tokenizer needs updating! Downloading tokenizer now..."
             )
             # Load/download the tokenizer files
-            target_tokenizer_files = ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "vocab.json", "merges.txt"]
+            target_tokenizer_files = ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "vocab.json", "merges.txt", "tokenizer.model"]
             if os.path.exists(self.model_name):
                 hf_tokenizer_path = self.model_name
             else:

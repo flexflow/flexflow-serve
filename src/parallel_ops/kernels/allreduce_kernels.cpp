@@ -25,7 +25,9 @@ AllReduceMeta::AllReduceMeta(FFHandler handle, AllReduce const *reduct)
 namespace Kernels {
 namespace AllReduce {
 
-void inference_kernel_wrapper(AllReduceMeta const *m,
+void inference_kernel_wrapper(Legion::Context ctx,
+                              Legion::Runtime *runtime,
+                              AllReduceMeta const *m,
                               BatchConfig const *bc,
                               GenericTensorAccessorR const &input,
                               GenericTensorAccessorW const &output) {
@@ -37,6 +39,7 @@ void inference_kernel_wrapper(AllReduceMeta const *m,
   size_t num_elements = bc->num_tokens * hidden_dim_size;
 #ifdef FF_USE_NCCL
   ncclDataType_t nccl_data_type = ff_to_nccl_datatype(input.data_type);
+  runtime->concurrent_task_barrier(ctx);
   checkNCCL(ncclAllReduce(input.ptr,
                           output.ptr,
                           num_elements,
@@ -44,12 +47,15 @@ void inference_kernel_wrapper(AllReduceMeta const *m,
                           ncclSum,
                           m->handle.ncclComm,
                           stream));
+  runtime->concurrent_task_barrier(ctx);
 #else
   assert(false && "Must enable FF_USE_NCCL to use AllReduce operators");
 #endif
 }
 
-void forward_kernel_wrapper(AllReduceMeta const *m,
+void forward_kernel_wrapper(Legion::Context ctx,
+                            Legion::Runtime *runtime,
+                            AllReduceMeta const *m,
                             GenericTensorAccessorR const &input,
                             GenericTensorAccessorW const &output) {
   hipStream_t stream;
@@ -59,6 +65,7 @@ void forward_kernel_wrapper(AllReduceMeta const *m,
   size_t hidden_dim_size = input.domain.hi()[0] - input.domain.lo()[0] + 1;
 #ifdef FF_USE_NCCL
   ncclDataType_t nccl_data_type = ff_to_nccl_datatype(input.data_type);
+  runtime->concurrent_task_barrier(ctx);
   checkNCCL(ncclAllReduce(input.ptr,
                           output.ptr,
                           input.domain.get_volume(),
@@ -66,6 +73,7 @@ void forward_kernel_wrapper(AllReduceMeta const *m,
                           ncclSum,
                           m->handle.ncclComm,
                           stream));
+  runtime->concurrent_task_barrier(ctx);
 #else
   assert(false && "Must enable FF_USE_NCCL to use AllReduce operators");
 #endif

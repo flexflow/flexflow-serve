@@ -493,7 +493,8 @@ ArgMaxMeta::ArgMaxMeta(FFHandler handler,
   size_t prob_size = batch_size;
   assert(data_type == DT_FLOAT || data_type == DT_HALF);
   size_t total_size = prob_size * sizeof(float);
-  gpu_mem_allocator.create_legion_instance(reserveInst, total_size);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, total_size, "ArgMaxMeta");
   probs = gpu_mem_allocator.allocate_instance<float>(prob_size);
 }
 ArgMaxMeta::~ArgMaxMeta(void) {

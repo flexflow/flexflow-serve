@@ -16,6 +16,7 @@
 #ifndef _COMMUNICATION_BUFFER_H
 #define _COMMUNICATION_BUFFER_H
 
+#include "legion.h"
 #include <vector>
 #ifdef FF_USE_NCCL
 #if defined(FF_USE_CUDA) || defined(FF_USE_HIP_CUDA)
@@ -58,7 +59,10 @@ public:
   int *barrier_flag;
 };
 
-CommunicationBuffer *create_comm_buf_with_local_ptr(int num_devices,
+// All NCCL operations need to be wrapped by Legion concurrent_task_barrier.
+CommunicationBuffer *create_comm_buf_with_local_ptr(Legion::Context ctx,
+                                                    Legion::Runtime *runtime,
+                                                    int num_devices,
                                                     int device_id,
                                                     ncclComm_t ncclComm,
                                                     void *allgather_src,

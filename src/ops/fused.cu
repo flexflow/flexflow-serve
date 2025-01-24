@@ -133,6 +133,8 @@ __host__ void FusedOp::forward_task(Task const *task,
   for (int op = start + 1; op < fused->numOperators; op++) {
     if (metas->meta[op] != NULL) {
       assert(metas->meta[start]->handle.blas == metas->meta[op]->handle.blas);
+      assert(metas->meta[start]->handle.blasLt ==
+             metas->meta[op]->handle.blasLt);
       assert(metas->meta[start]->handle.dnn == metas->meta[op]->handle.dnn);
     }
   }
@@ -594,6 +596,8 @@ __host__ void
   for (int op = start + 1; op < fused->numOperators; op++) {
     if (metas->meta[op] != NULL) {
       assert(metas->meta[start]->handle.blas == metas->meta[op]->handle.blas);
+      assert(metas->meta[start]->handle.blasLt ==
+             metas->meta[op]->handle.blasLt);
       assert(metas->meta[start]->handle.dnn == metas->meta[op]->handle.dnn);
     }
   }
@@ -1305,6 +1309,8 @@ __host__ void FusedOp::backward_task(Task const *task,
   for (int op = start + 1; op < fused->numOperators; op++) {
     if (metas->meta[op] != NULL) {
       assert(metas->meta[start]->handle.blas == metas->meta[op]->handle.blas);
+      assert(metas->meta[start]->handle.blasLt ==
+             metas->meta[op]->handle.blasLt);
       assert(metas->meta[start]->handle.dnn == metas->meta[op]->handle.dnn);
     }
   }

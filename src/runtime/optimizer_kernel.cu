@@ -75,8 +75,8 @@ __host__ void SGDOptimizer::ps_update_task_gpu(SGDOptimizer const *op,
 }
 
 #ifdef FF_USE_NCCL
-__host__ void SGDOptimizer::nccl_update_task_gpu(Context ctx,
-                                                 Runtime *runtime,
+__host__ void SGDOptimizer::nccl_update_task_gpu(Legion::Context ctx,
+                                                 Legion::Runtime *runtime,
                                                  SGDOptimizer const *op,
                                                  OpMeta const *meta,
                                                  float const *w_grad_ptr,
@@ -187,8 +187,8 @@ __host__ void AdamOptimizer::ps_update_task_gpu(AdamOptimizer const *op,
 }
 
 #ifdef FF_USE_NCCL
-__host__ void AdamOptimizer::nccl_update_task_gpu(Context ctx,
-                                                  Runtime *runtime,
+__host__ void AdamOptimizer::nccl_update_task_gpu(Legion::Context ctx,
+                                                  Legion::Runtime *runtime,
                                                   AdamOptimizer const *op,
                                                   OpMeta const *meta,
                                                   float const *w_grad_ptr,

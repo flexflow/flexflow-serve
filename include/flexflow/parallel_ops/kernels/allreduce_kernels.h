@@ -31,15 +31,15 @@ public:
 namespace Kernels {
 namespace AllReduce {
 
-void inference_kernel_wrapper(Context ctx,
-                              Runtime *runtime,
+void inference_kernel_wrapper(Legion::Context ctx,
+                              Legion::Runtime *runtime,
                               AllReduceMeta *m,
                               BatchConfig const *bc,
                               GenericTensorAccessorR const &input,
                               GenericTensorAccessorW const &output);
 
-void forward_kernel_wrapper(Context ctx,
-                            Runtime *runtime,
+void forward_kernel_wrapper(Legion::Context ctx,
+                            Legion::Runtime *runtime,
                             AllReduceMeta const *m,
                             GenericTensorAccessorR const &input,
                             GenericTensorAccessorW const &output);

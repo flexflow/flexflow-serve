@@ -132,6 +132,16 @@ std::ostream &operator<<(std::ostream &os,
   return os;
 }
 
+std::ostream &operator<<(std::ostream &os, BatchConfig::BitMask const &bm) {
+  os << "BitMask {\n"
+     << "  non_tree_cache_size: " << bm.non_tree_cache_size << "\n"
+     << "  tree_or_prompt_size: " << bm.tree_or_prompt_size << "\n"
+     << "  current_layer_size: " << bm.current_layer_size << "\n"
+     << "  bit_mask: [" << bm.bit_mask << "]\n";
+  os << "}";
+  return os;
+}
+
 std::ostream &operator<<(std::ostream &os, BatchConfig const &bc) {
   os << "@@@@@@@@@@@@@@ Batch Config (mode " << bc.get_mode()
      << ") @@@@@@@@@@@@@@" << std::endl;
@@ -241,6 +251,38 @@ std::ostream &operator<<(std::ostream &os, BatchConfig const &bc) {
   }
 
   os << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@" << std::endl;
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os, InferenceResult const &ir) {
+  os << "InferenceResult {\n"
+     << "  num_token_ids: " << ir.num_token_ids << "\n"
+     << "  num_gumbel_logits: " << ir.num_gumbel_logits << "\n"
+     << "  token_ids: [";
+  for (int i = 0; i < ir.num_token_ids; i++) {
+    os << ir.token_ids[i];
+    if (i < ir.num_token_ids - 1) {
+      os << ", ";
+    }
+  }
+  os << "]\n"
+     << "  probs: [";
+  for (int i = 0; i < ir.num_token_ids; i++) {
+    os << ir.probs[i];
+    if (i < ir.num_token_ids - 1) {
+      os << ", ";
+    }
+  }
+  os << "]\n"
+     << "  gumbel_logits: [";
+  for (int i = 0; i < ir.num_gumbel_logits; i++) {
+    os << ir.gumbel_logits[i];
+    if (i < ir.num_gumbel_logits - 1) {
+      os << ", ";
+    }
+  }
+  os << "]\n"
+     << "}";
   return os;
 }
 

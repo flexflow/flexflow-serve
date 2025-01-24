@@ -149,18 +149,6 @@ void compute_qkv(IncMultiHeadSelfAttentionMeta const *m,
   checkCUDA(cublasSetStream(m->handle.blas, stream));
   checkCUDNN(cudnnSetStream(m->handle.dnn, stream));
   cudaDataType_t cublas_data_type = ff_to_cuda_datatype(m->output_type[0]);
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 11000)
-  cudaDataType_t compute_type = cublas_data_type;
-#else
-  // For best performance, set the default cublas compute type to
-  // CUBLAS_COMPUTE_16F for half precision and to
-  // CUBLAS_COMPUTE_32F_FAST_16F for full precision
-  cublasComputeType_t compute_type = CUBLAS_COMPUTE_16F;
-  if (m->output_type[0] == DT_FLOAT) {
-    compute_type = CUBLAS_COMPUTE_32F_FAST_16F;
-  }
-#endif
-
   //   int device;
   //   checkCUDA(cudaGetDevice(&device));
   //   cudaEvent_t t_start, t_end;
@@ -187,25 +175,20 @@ void compute_qkv(IncMultiHeadSelfAttentionMeta const *m,
     // matrix B's layout: [hidden_size (hidden_dim), num_new_tokens]
     // matrix C: devQKVProjArray
     // matrix B's layout: [qk_dim, num_heads, 3, num_new_tokens]
-    checkCUDA(cublasGemmEx(m->handle.blas,
-                           CUBLAS_OP_T,
-                           CUBLAS_OP_N,
-                           m_,
-                           n,
-                           k,
-                           &alpha,
-                           weight_ptr,
-                           cublas_data_type,
-                           lda,
-                           input_ptr,
-                           cublas_data_type,
-                           ldb,
-                           &beta,
-                           output_ptr,
-                           cublas_data_type,
-                           ldc,
-                           compute_type,
-                           CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    m->handle.gemm_engine->gemm_internal(CUBLAS_OP_T,
+                                         CUBLAS_OP_N,
+                                         m_,
+                                         n,
+                                         k,
+                                         alpha,
+                                         weight_ptr,
+                                         lda,
+                                         input_ptr,
+                                         ldb,
+                                         beta,
+                                         output_ptr,
+                                         ldc,
+                                         stream);
   }
 
   //   checkCUDA(cudaEventRecord(t_end, stream));
@@ -358,7 +341,6 @@ void apply_pos_encoding_to_tokens_in_batch(
       m->local_hidden_size);
 }
 
-// TODO: upgrade to llama3 rope, same as apply_pos_encoding_to_tokens_in_batch
 __global__ void apply_pos_encoding_to_streaming_proj_kernel(
     half *kv_cache,
     BatchConfig::PerRequestInfo const *requestInfos,
@@ -366,6 +348,12 @@ __global__ void apply_pos_encoding_to_streaming_proj_kernel(
     int const max_num_pages,
     int num_kv_heads,
     int head_dim,
+    float rope_theta,
+    bool llama3_rope,
+    float factor,
+    float low_freq_factor,
+    float high_freq_factor,
+    int original_max_position_embeddings,
     StreamingCacheInfo const *streaming_cache_infos,
     uint32_t const max_num_requests) {
   int const kv_hidden_size = num_kv_heads * head_dim;
@@ -398,7 +386,27 @@ __global__ void apply_pos_encoding_to_streaming_proj_kernel(
   // Apply the rotary position encoding.
   cuFloatComplex cii = {kv_cache[real_part_idx], kv_cache[complex_part_idx]};
   size_t pos = token_idx;
-  float freq = pos * (1.0 / pow(10000.0, (float)2 * offset_in_head / head_dim));
+  float freq =
+      pos * (1.0 / pow(rope_theta, (float)2 * offset_in_head / head_dim));
+
+  if (llama3_rope) {
+    float pi = CUDART_PI_F;
+    float wavelen = 2 * pi / freq;
+    float low_freq_wavelen = original_max_position_embeddings / low_freq_factor;
+    float high_freq_wavelen =
+        original_max_position_embeddings / high_freq_factor;
+    if (wavelen < high_freq_wavelen) {
+    } else if (wavelen > low_freq_wavelen) {
+      freq = freq / factor;
+    } else {
+      assert(low_freq_wavelen != high_freq_wavelen);
+      float smooth =
+          (original_max_position_embeddings / wavelen - low_freq_factor) /
+          (high_freq_factor - low_freq_factor);
+      freq = ((1 - smooth) * freq / factor + smooth * freq);
+    }
+  }
+
   cuFloatComplex complex_pos = {cos(freq), sin(freq)};
   cii = cuCmulf(cii, complex_pos);
   kv_cache[real_part_idx] = cii.x;
@@ -411,6 +419,10 @@ void apply_pos_encoding_to_streaming_proj(
     BatchConfig const *bc,
     cudaStream_t stream) {
   assert(m->streaming_cache);
+  // apply rotary embedding if needed
+  if (!m->rotary_embedding_meta->apply_rotary_embedding) {
+    return;
+  }
   int const kv_hidden_size = m->num_kv_heads * m->qk_dim;
   int num_tokens = 0;
   for (int req_idx = 0; req_idx < BatchConfig::max_requests_per_batch();
@@ -427,6 +439,7 @@ void apply_pos_encoding_to_streaming_proj(
   int const max_num_pages = round_up_pages(
       BatchConfig::MAX_STREAMING_POS - BatchConfig::get_max_tree_depth() +
       BatchConfig::max_spec_tree_token_num());
+  bool llama3_rope = (m->rotary_embedding_meta->rope_type == "llama3");
   apply_pos_encoding_to_streaming_proj_kernel<<<GET_BLOCKS(parallelism),
                                                 min(CUDA_NUM_THREADS,
                                                     parallelism),
@@ -438,6 +451,12 @@ void apply_pos_encoding_to_streaming_proj(
       max_num_pages,
       m->num_kv_heads,
       m->qk_dim,
+      m->rotary_embedding_meta->rope_theta,
+      llama3_rope,
+      m->rotary_embedding_meta->factor,
+      m->rotary_embedding_meta->low_freq_factor,
+      m->rotary_embedding_meta->high_freq_factor,
+      m->rotary_embedding_meta->original_max_position_embeddings,
       m->streaming_cache_infos,
       bc->max_requests_per_batch());
 }
@@ -848,13 +867,6 @@ void compute_o_prod_bias(IncMultiHeadSelfAttentionMeta const *m,
   cudaDataType_t cublas_data_type = ff_to_cuda_datatype(m->output_type[0]);
   cudnnDataType_t cudnn_data_type = ff_to_cudnn_datatype(m->output_type[0]);
   assert(data_type_size(m->output_type[0]) == sizeof(DT));
-#if CUDA_VERSION >= 11000
-  // TODO: currently set the default to CUBLAS_COMPUTE_16F for best
-  // performance
-  cublasComputeType_t compute_type = CUBLAS_COMPUTE_16F;
-#else
-  cudaDataType_t compute_type = cublas_data_type;
-#endif
   // Project to output, save result directly on output tensor
   {
     DT alpha = 1.0f, beta = 0.0f;
@@ -876,25 +888,20 @@ void compute_o_prod_bias(IncMultiHeadSelfAttentionMeta const *m,
     // matrix B's layout: [o_dim, num_new_tokens]
     DT *C = static_cast<DT *>(output_ptr);
 
-    checkCUDA(cublasGemmEx(m->handle.blas,
-                           CUBLAS_OP_T,
-                           CUBLAS_OP_N,
-                           m_,
-                           n,
-                           k,
-                           &alpha,
-                           A,
-                           cublas_data_type,
-                           lda,
-                           B,
-                           cublas_data_type,
-                           ldb,
-                           &beta,
-                           C,
-                           cublas_data_type,
-                           ldc,
-                           compute_type,
-                           CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    m->handle.gemm_engine->gemm_internal(CUBLAS_OP_T,
+                                         CUBLAS_OP_N,
+                                         m_,
+                                         n,
+                                         k,
+                                         alpha,
+                                         A,
+                                         lda,
+                                         B,
+                                         ldb,
+                                         beta,
+                                         C,
+                                         ldc,
+                                         stream);
   }
   // Add final output bias
   if (*m->final_bias && shard_id == 0) {

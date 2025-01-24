@@ -49,7 +49,8 @@ struct ModelMeta {
   std::string llm_weights_path;
   std::string llm_model_config_path;
 
-  int bos_token_id, eos_token_id;
+  int bos_token_id;
+  std::vector<int> eos_token_ids;
 
   std::vector<ModelType> ssm_model_types;
   std::vector<std::string> ssm_model_config_paths;
@@ -62,6 +63,7 @@ void parse_input_args(char **argv,
                       ModelNames &model_names,
                       bool &use_full_precision,
                       bool &verbose,
+                      int &ssm_tp_degree,
                       int &max_requests_per_batch,
                       int &max_tokens_per_batch,
                       int &max_tokens_per_ssm_batch,
@@ -85,7 +87,8 @@ void parse_input_args(char **argv,
                       bool &greedy_schedule,
                       bool &equal_schedule,
                       std::string &emission_file_path,
-                      bool &add_special_tokens) {
+                      bool &add_special_tokens,
+                      bool &eval_overhead_breakdown) {
   for (int i = 1; i < argc; i++) {
     // llm model name
     if (!strcmp(argv[i], "-llm-model")) {
@@ -102,6 +105,10 @@ void parse_input_args(char **argv,
         c = std::tolower(c);
       }
       model_names.ssm_model_names.push_back(ssm_model_name);
+      continue;
+    }
+    if (!strcmp(argv[i], "-ssm-tp-degree")) {
+      ssm_tp_degree = std::stoi(argv[++i]);
       continue;
     }
     // cache folder
@@ -230,6 +237,10 @@ void parse_input_args(char **argv,
       add_special_tokens = false;
       continue;
     }
+    if (!strcmp(argv[i], "--eval-overhead-breakdown")) {
+      eval_overhead_breakdown = true;
+      continue;
+    }
   }
   if (paths.cache_folder_path.empty()) {
     char const *ff_cache_path = std::getenv("FF_CACHE_PATH");
@@ -281,7 +292,8 @@ void get_model_meta(FilePaths &file_paths,
   model_metadata.llm_model_type = ModelType::UNKNOWN;
   auto architectures = llm_model_config["architectures"];
   for (auto const &str : architectures) {
-    if (str == "LlamaForCausalLM" || str == "LLaMAForCausalLM") {
+    if (str == "LlamaForCausalLM" || str == "LLaMAForCausalLM" ||
+        str == "MistralForCausalLM") {
       model_metadata.llm_model_type = ModelType::LLAMA;
       break;
     } else if (str == "OPTForCausalLM") {
@@ -299,10 +311,21 @@ void get_model_meta(FilePaths &file_paths,
       llm_model_config.find("bos_token_id") == llm_model_config.end()
           ? -1
           : (int)llm_model_config.at("bos_token_id");
-  model_metadata.eos_token_id =
-      llm_model_config.find("eos_token_id") == llm_model_config.end()
-          ? -1
-          : (int)llm_model_config.at("eos_token_id");
+  // model_metadata.eos_token_id =
+  //     llm_model_config.find("eos_token_id") == llm_model_config.end()
+  //         ? -1
+  //         : (int)llm_model_config.at("eos_token_id");
+  if (llm_model_config.find("eos_token_id") != llm_model_config.end()) {
+    if (llm_model_config["eos_token_id"].is_array()) {
+      for (auto &eos_token_id : llm_model_config["eos_token_id"]) {
+        model_metadata.eos_token_ids.push_back(eos_token_id);
+      }
+    } else {
+      model_metadata.eos_token_ids.push_back(llm_model_config["eos_token_id"]);
+    }
+  } else {
+    model_metadata.eos_token_ids.push_back(-1);
+  }
 
   for (auto ssm_model_name : model_metadata.model_names.ssm_model_names) {
     std::string ssm_config_path = join_path({file_paths.cache_folder_path,
@@ -331,7 +354,8 @@ void get_model_meta(FilePaths &file_paths,
     ModelType ssm_model_type = ModelType::UNKNOWN;
     auto architectures = ssm_model_config["architectures"];
     for (auto const &str : architectures) {
-      if (str == "LlamaForCausalLM" || str == "LLaMAForCausalLM") {
+      if (str == "LlamaForCausalLM" || str == "LLaMAForCausalLM" ||
+          str == "MistralForCausalLM") {
         ssm_model_type = ModelType::LLAMA;
         break;
       } else if (str == "OPTForCausalLM") {
@@ -349,15 +373,15 @@ void get_model_meta(FilePaths &file_paths,
         ssm_model_config.find("bos_token_id") == ssm_model_config.end()
             ? -1
             : (int)ssm_model_config.at("bos_token_id");
-    int ssm_eos_id =
-        ssm_model_config.find("eos_token_id") == ssm_model_config.end()
-            ? -1
-            : (int)ssm_model_config.at("eos_token_id");
-    if (ssm_bos_id != model_metadata.bos_token_id ||
-        ssm_eos_id != model_metadata.eos_token_id) {
-      printf("Warning: bos/eos token id mismatch between LLM and one of the "
-             "SSMs!\n");
-    }
+    // int ssm_eos_id =
+    //     ssm_model_config.find("eos_token_id") == ssm_model_config.end()
+    //         ? -1
+    //         : (int)ssm_model_config.at("eos_token_id");
+    // if (ssm_bos_id != model_metadata.bos_token_id ||
+    //     ssm_eos_id != model_metadata.eos_token_id) {
+    //   printf("Warning: bos/eos token id mismatch between LLM and one of the "
+    //          "SSMs!\n");
+    // }
     model_metadata.ssm_model_types.push_back(ssm_model_type);
     model_metadata.ssm_model_config_paths.push_back(ssm_config_path);
     model_metadata.ssm_model_weights_paths.push_back(ssm_weights_path);
@@ -382,6 +406,7 @@ void FlexFlow::top_level_task(Task const *task,
   ModelMeta model_metadata;
   bool use_full_precision = false;
   bool verbose = false;
+  int ssm_tp_degree = 1;
   int max_requests_per_batch = 8;
   int max_tokens_per_batch = 128;
   int max_tokens_per_ssm_batch = -1;
@@ -407,6 +432,7 @@ void FlexFlow::top_level_task(Task const *task,
   bool greedy_schedule = false;
   bool equal_schedule = false;
   bool add_special_tokens = true;
+  bool eval_overhead_breakdown = false;
   std::string emission_file_path;
 
   InputArgs const &command_args = HighLevelRuntime::get_input_args();
@@ -418,6 +444,7 @@ void FlexFlow::top_level_task(Task const *task,
                    model_metadata.model_names,
                    use_full_precision,
                    verbose,
+                   ssm_tp_degree,
                    max_requests_per_batch,
                    max_tokens_per_batch,
                    max_tokens_per_ssm_batch,
@@ -441,7 +468,8 @@ void FlexFlow::top_level_task(Task const *task,
                    greedy_schedule,
                    equal_schedule,
                    emission_file_path,
-                   add_special_tokens);
+                   add_special_tokens,
+                   eval_overhead_breakdown);
   if (max_tokens_per_ssm_batch == -1) {
     max_tokens_per_ssm_batch = max_tokens_per_batch;
   }
@@ -454,6 +482,8 @@ void FlexFlow::top_level_task(Task const *task,
   assert(ffconfig.data_parallelism_degree * ffconfig.tensor_parallelism_degree *
              ffconfig.pipeline_parallelism_degree ==
          ffconfig.numNodes * ffconfig.workersPerNode);
+  assert(ssm_tp_degree >= 1 &&
+         ssm_tp_degree <= ffconfig.numNodes * ffconfig.workersPerNode);
 
   // Sanity check for SpecInfer old version
   if (spec_infer_old_version) {
@@ -481,7 +511,7 @@ void FlexFlow::top_level_task(Task const *task,
   rm->set_streaming_cache(streaming_cache);
   rm->register_tokenizer(model_metadata.llm_model_type,
                          model_metadata.bos_token_id,
-                         model_metadata.eos_token_id,
+                         model_metadata.eos_token_ids,
                          model_metadata.llm_tokenizer_path);
   rm->set_decoding_mode(decoding_mode);
   rm->set_slo_violation_early_termination(slo_attainment_early_termination);
@@ -492,6 +522,7 @@ void FlexFlow::top_level_task(Task const *task,
   rm->set_greedy_schedule(greedy_schedule);
   rm->set_equal_schedule(equal_schedule);
   rm->register_output_filepath(file_paths.output_file_path);
+  rm->set_eval_overhead_breakdown(eval_overhead_breakdown);
 
   // Create LLM model
   FFModel tree_model(ffconfig, ffconfig.cpu_offload);
@@ -531,11 +562,12 @@ void FlexFlow::top_level_task(Task const *task,
   std::vector<int> ssm_model_ids;
   std::vector<FFModel> ssm_models;
   FFConfig bm_config = ffconfig;
-  bm_config.data_parallelism_degree = bm_config.tensor_parallelism_degree =
-      bm_config.pipeline_parallelism_degree = 1;
-  //   bm_config.data_parallelism_degree = 1;
-  //   bm_config.tensor_parallelism_degree = 4;
-  //   bm_config.pipeline_parallelism_degree = 1;
+  std::cout << "SSM TP Degree: " << ssm_tp_degree << std::endl;
+  // bm_config.data_parallelism_degree = bm_config.tensor_parallelism_degree =
+  //     bm_config.pipeline_parallelism_degree = 1;
+  bm_config.data_parallelism_degree = 1;
+  bm_config.tensor_parallelism_degree = ssm_tp_degree;
+  bm_config.pipeline_parallelism_degree = 1;
   for (int ssm_id = 0; ssm_id < num_ssms; ssm_id++) {
     FFModel beam_model(bm_config);
     ssm_models.push_back(beam_model);

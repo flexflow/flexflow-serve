@@ -14,6 +14,7 @@
  */
 
 #include "flexflow/utils/memory_allocator.h"
+#include "flexflow/mapper.h"
 
 namespace FlexFlow {
 
@@ -21,14 +22,30 @@ namespace FlexFlow {
 using Legion::coord_t;
 using Legion::Memory;
 using Realm::RegionInstance;
+using namespace Legion;
+using namespace Mapping;
+
+Legion::Logger log_ff_mem_allocator("MemoryAllocator");
 
 MemoryAllocator::MemoryAllocator(Memory _memory)
     : memory(_memory), reserved_ptr(nullptr), instance_ptr(nullptr),
       reserved_total_size(0), reserved_allocated_size(0),
-      instance_total_size(0), instance_allocated_size(0) {}
+      instance_total_size(0), instance_allocated_size(0),
+      log_instance_creation(false) {
+  InputArgs const &command_args = HighLevelRuntime::get_input_args();
+  char **argv = command_args.argv;
+  int argc = command_args.argc;
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "--log-instance-creation")) {
+      log_instance_creation = true;
+      break;
+    }
+  }
+}
 
 void MemoryAllocator::create_legion_instance(RegionInstance &inst,
-                                             size_t size) {
+                                             size_t size,
+                                             char const *task_name) {
   // Assert that we have used up previously created region instance
   assert(instance_total_size == instance_allocated_size);
   Realm::Rect<1, coord_t> bounds(Realm::Point<1, coord_t>(0),
@@ -38,6 +55,16 @@ void MemoryAllocator::create_legion_instance(RegionInstance &inst,
   Realm::RegionInstance::create_instance(
       inst, memory, bounds, field_sizes, 0, Realm::ProfilingRequestSet())
       .wait();
+  if (log_instance_creation) {
+    log_ff_mem_allocator.print(
+        "Created instance in memory_kind: %s memory_id: %llx size: %zu "
+        "(capacity %lu) task_name: %s",
+        Legion::Mapping::Utilities::to_string(memory.kind()),
+        memory.id,
+        size,
+        memory.capacity(),
+        ((task_name != NULL) ? task_name : "unknown"));
+  }
   instance_ptr = inst.pointer_untyped(0, 0);
   instance_total_size = size;
   instance_allocated_size = 0;

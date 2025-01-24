@@ -634,8 +634,10 @@ SpecIncMultiHeadSelfAttentionMeta::SpecIncMultiHeadSelfAttentionMeta(
                                                   // be added here later
 
     // We always directly allocate memory for small speculative models
-    gpu_mem_allocator.create_legion_instance(beam_search_reserve_inst,
-                                             total_size);
+    gpu_mem_allocator.create_legion_instance(
+        beam_search_reserve_inst,
+        total_size,
+        "SpecIncMultiHeadSelfAttentionMeta");
     beam_token_infos =
         gpu_mem_allocator
             .allocate_instance<TreeSearchBatchConfig::BeamSearchPerTokenInfo>(

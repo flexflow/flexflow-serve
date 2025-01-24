@@ -585,9 +585,11 @@ IncMultiHeadSelfAttentionMeta::IncMultiHeadSelfAttentionMeta(
       assert(gpu_mem_allocator.reserved_total_size -
                  gpu_mem_allocator.reserved_allocated_size >=
              totalSharedSize);
-      gpu_mem_allocator.create_legion_instance(reserveInst, instance_size);
+      gpu_mem_allocator.create_legion_instance(
+          reserveInst, instance_size, "IncMultiHeadSelfAttentionMeta");
     } else {
-      gpu_mem_allocator.create_legion_instance(reserveInst, totalSize);
+      gpu_mem_allocator.create_legion_instance(
+          reserveInst, totalSize, "IncMultiHeadSelfAttentionMeta");
     }
 
     // in tree_verify, enable devQKVProjArray;

@@ -184,13 +184,13 @@ void ArgTopK::forward_kernel_wrapper(ArgTopKMeta *m,
                             indices.get_int32_ptr(),
                             batch_size,
                             length,
-                            m->k,
+                            k,
                             m->sorted,
                             m->renormalize,
                             bc,
                             stream);
     // transfer data from half to float (half_precision_output to output)
-    int size = length * batch_size;
+    int size = k * batch_size;
     half2float_kernel<<<GET_BLOCKS(size),
                         min((int)CUDA_NUM_THREADS, size),
                         0,
@@ -203,7 +203,7 @@ void ArgTopK::forward_kernel_wrapper(ArgTopKMeta *m,
                             indices.get_int32_ptr(),
                             batch_size,
                             length,
-                            m->k,
+                            k,
                             m->sorted,
                             m->renormalize,
                             bc,
@@ -227,11 +227,11 @@ ArgTopKMeta::ArgTopKMeta(FFHandler handler,
                          Op const *op,
                          MemoryAllocator &gpu_mem_allocator)
     : OpMeta(handler, op) {
-  max_input_size = BatchConfig::MAX_NUM_TOKENS * 32000; // TODO: use vocab_size
-  gpu_mem_allocator.create_legion_instance(reserveInst,
-                                           sizeof(half) * max_input_size);
+  max_output_size = BatchConfig::MAX_NUM_TOKENS * BatchConfig::MAX_K_LOGITS;
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, sizeof(half) * max_output_size, "ArgTopKMeta");
   half_precision_output = gpu_mem_allocator.allocate_instance_untyped(
-      sizeof(half) * max_input_size);
+      sizeof(half) * max_output_size);
 }
 
 ArgTopKMeta::~ArgTopKMeta() {

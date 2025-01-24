@@ -18,10 +18,12 @@
 #include "ffconst.h"
 #include "flexflow/attention_config.h"
 #include "flexflow/batch_config.h"
+#include "flexflow/ops/kernels/gemm_impl.h"
 #include "legion.h"
 #include <cstddef>
 #include <cstring>
 #if defined(FF_USE_CUDA) || defined(FF_USE_HIP_CUDA)
+#include <cublasLt.h>
 #include <cublas_v2.h>
 #include <cudnn.h>
 #elif defined(FF_USE_HIP_ROCM)
@@ -72,6 +74,8 @@ struct FFHandler {
 #if defined(FF_USE_CUDA) || defined(FF_USE_HIP_CUDA)
   cudnnHandle_t dnn;
   cublasHandle_t blas;
+  cublasLtHandle_t blasLt;
+  Internal::GemmEngine *gemm_engine;
 #else
   miopenHandle_t dnn;
   hipblasHandle_t blas;
@@ -95,10 +99,10 @@ struct FFHandler {
   size_t offload_reserve_space_size;
   DataType quantization_type;
   bool allowTensorOpMathConversion;
-#ifdef FF_USE_NCCL
-  ncclComm_t ncclComm;
   int num_devices;
   int device_id;
+#ifdef FF_USE_NCCL
+  ncclComm_t ncclComm;
 #endif
 };
 
@@ -152,6 +156,7 @@ public:
   Legion::Runtime *lg_hlr;
   Legion::IndexSpaceT<1> all_gpu_task_is;
   // Legion::FieldSpace field_space;
+  bool log_instance_creation;
   bool benchmarking, profiling, perform_fusion;
   bool inference_debugging;
   size_t simulator_work_space_size;

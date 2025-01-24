@@ -100,10 +100,20 @@ FFHandler
   assert(handle.tree_verify_attention_metadata != nullptr &&
          "Attention metadata must be allocated");
   checkCUDA(cublasCreate(&handle.blas));
+  checkCUDA(cublasLtCreate(&handle.blasLt));
   if (handle.allowTensorOpMathConversion) {
     checkCUDA(cublasSetMathMode(handle.blas, CUBLAS_TENSOR_OP_MATH));
   }
   checkCUDNN(cudnnCreate(&handle.dnn));
+  handle.num_devices = 0;
+  handle.device_id = 0;
+  handle.gemm_engine = new Internal::GemmEngine(handle.blas, handle.blasLt);
+  // We may not use all devices, physical_device may not be successive, so we
+  // explicitly get the physical device id
+  int physical_device;
+  checkCUDA(cudaGetDevice(&physical_device));
+  checkCUDA(cudaGetDeviceProperties(handle.gemm_engine->device_prop,
+                                    physical_device));
   // #ifdef FF_USE_NCCL
   //   checkNCCL(ncclCommInitRank(&handle.nccl, info->allRanks, info->ncclId,
   //   info->myRank)); fprintf(stderr, "handle.nccl(%p)\n", handle.nccl);
@@ -164,7 +174,8 @@ FFHandler
   if (handle.batch_config_metadata_size +
           handle.incr_attention_metadata->mem_size() +
           handle.tree_search_attention_metadata->mem_size() +
-          handle.tree_verify_attention_metadata->mem_size() >
+          handle.tree_verify_attention_metadata->mem_size() +
+          handle.gemm_engine->workspace_size >
       0) {
     // allocate memory for offload reserve space
     Memory gpu_mem = Machine::MemoryQuery(Machine::get_machine())
@@ -177,7 +188,8 @@ FFHandler
             handle.batch_config_metadata_size +
             handle.incr_attention_metadata->mem_size() +
             handle.tree_search_attention_metadata->mem_size() +
-            handle.tree_verify_attention_metadata->mem_size() - 1));
+            handle.tree_verify_attention_metadata->mem_size() +
+            handle.gemm_engine->workspace_size - 1));
     std::vector<size_t> field_sizes;
     field_sizes.push_back(sizeof(char));
     Realm::RegionInstance workspaceInst;
@@ -205,18 +217,24 @@ FFHandler
                             handle.incr_attention_metadata->mem_size() +
                             handle.tree_search_attention_metadata->mem_size()),
         handle.tree_verify_attention_metadata->mem_size());
+    handle.gemm_engine->assign_workspace(
+        static_cast<void *>(static_cast<char *>(handle.batch_config_metadata) +
+                            handle.batch_config_metadata_size +
+                            handle.incr_attention_metadata->mem_size() +
+                            handle.tree_search_attention_metadata->mem_size() +
+                            handle.tree_verify_attention_metadata->mem_size()),
+        handle.gemm_engine->workspace_size);
   } else {
     handle.batch_config_metadata = nullptr;
     handle.incr_attention_metadata->assign_address(nullptr, 0);
     handle.tree_search_attention_metadata->assign_address(nullptr, 0);
     handle.tree_verify_attention_metadata->assign_address(nullptr, 0);
+    handle.gemm_engine->assign_workspace(nullptr, 0);
   }
 
   // checkCUDA(cudaMalloc(&handle.workSpace, handle.workSpaceSize));
 #ifdef FF_USE_NCCL
   handle.ncclComm = NULL;
-  handle.num_devices = 0;
-  handle.device_id = 0;
 #endif
   return handle;
 }

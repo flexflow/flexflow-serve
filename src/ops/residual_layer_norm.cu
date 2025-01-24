@@ -37,7 +37,8 @@ ResidualLayerNormMeta::ResidualLayerNormMeta(FFHandler handle,
   eps = ln->eps;
   DataType data_type = ln->data_type;
   size_t totalSize = effective_batch_size * data_type_size(data_type) * 3;
-  gpu_mem_allocator.create_legion_instance(reserveInst, totalSize);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, totalSize, "ResidualLayerNormMeta");
   mean_ptr = gpu_mem_allocator.allocate_instance_untyped(
       data_type_size(data_type) * effective_batch_size);
   rstd_ptr = gpu_mem_allocator.allocate_instance_untyped(

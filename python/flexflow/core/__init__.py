@@ -40,6 +40,7 @@ ff_arg_to_sysarg = {
     "zero_copy_memory_per_node": "-ll:zsize",
     "num_cpus": "-ll:cpu",
     "legion_utility_processors": "-ll:util",
+    "log_instance_creation": "--log-instance-creation",
     "profiling": "--profiling",
     "benchmarking": "--benchmarking",
     "inference_debugging": "--inference-debugging",

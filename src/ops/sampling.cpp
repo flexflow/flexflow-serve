@@ -204,7 +204,8 @@ SamplingMeta::SamplingMeta(FFHandler handler,
                                     idx_size + sorted_idx_size) +
                      data_type_size(data_type) * sorted_logits_size +
                      sizeof(hiprandState) * state_size;
-  gpu_mem_allocator.create_legion_instance(reserveInst, totalSize);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, totalSize, "SamplingMeta");
   begin_offset = gpu_mem_allocator.allocate_instance<int>(begin_offset_size);
   end_offset = gpu_mem_allocator.allocate_instance<int>(end_offset_size);
   idx = gpu_mem_allocator.allocate_instance<int>(idx_size);
@@ -262,7 +263,8 @@ SamplingMeta::SamplingMeta(FFHandler handler,
   //   assert(false && "input type in float and half");
   // }
 
-  gpu_mem_allocator.create_legion_instance(reserveInst, temp_storage_bytes);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, temp_storage_bytes, "SamplingMeta");
   d_temp_storage =
       gpu_mem_allocator.allocate_instance_untyped(temp_storage_bytes);
 }

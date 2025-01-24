@@ -238,41 +238,41 @@ void InferenceManager::compile_model_and_allocate_buffer(FFModel *model,
   }
 
   // print optimized graph
-  for (size_t i = 0; i < model->operators.size(); i++) {
-    Op *op = model->operators[i];
-    if (op->op_type == OP_INPUT || op->op_type == OP_WEIGHT) {
-      continue;
-    }
-    printf("operator[%zu]: type(%s) guid(%lu)\n",
-           i,
-           get_operator_type_name(model->operators[i]->op_type).c_str(),
-           model->operators[i]->op_guid);
-    for (int j = 0; j < op->numInputs; j++) {
-      assert(tensor_buffer.find(op->inputs[j]) != tensor_buffer.end());
-      LogicalRegion handle = tensor_buffer[op->inputs[j]][0]->region;
-      printf("\tinputs[%d] mapped_region(%d,%d,%d)\n",
-             j,
-             handle.get_index_space().get_id(),
-             handle.get_field_space().get_id(),
-             handle.get_tree_id());
-    }
-    for (int j = 0; j < op->numOutputs; j++) {
-      LogicalRegion handle = tensor_buffer[op->outputs[j]][0]->region;
-      printf("\toutputs[%d] mapped_region(%d,%d,%d)\n",
-             j,
-             handle.get_index_space().get_id(),
-             handle.get_field_space().get_id(),
-             handle.get_tree_id());
-    }
-    for (int j = 0; j < op->numWeights; j++) {
-      LogicalRegion handle = op->weights[j]->region;
-      printf("\tweights[%d] mapped_region(%d,%d,%d)\n",
-             j,
-             handle.get_index_space().get_id(),
-             handle.get_field_space().get_id(),
-             handle.get_tree_id());
-    }
-  }
+  // for (size_t i = 0; i < model->operators.size(); i++) {
+  //   Op *op = model->operators[i];
+  //   if (op->op_type == OP_INPUT || op->op_type == OP_WEIGHT) {
+  //     continue;
+  //   }
+  //   printf("operator[%zu]: type(%s) guid(%lu)\n",
+  //          i,
+  //          get_operator_type_name(model->operators[i]->op_type).c_str(),
+  //          model->operators[i]->op_guid);
+  //   for (int j = 0; j < op->numInputs; j++) {
+  //     assert(tensor_buffer.find(op->inputs[j]) != tensor_buffer.end());
+  //     LogicalRegion handle = tensor_buffer[op->inputs[j]][0]->region;
+  //     printf("\tinputs[%d] mapped_region(%d,%d,%d)\n",
+  //            j,
+  //            handle.get_index_space().get_id(),
+  //            handle.get_field_space().get_id(),
+  //            handle.get_tree_id());
+  //   }
+  //   for (int j = 0; j < op->numOutputs; j++) {
+  //     LogicalRegion handle = tensor_buffer[op->outputs[j]][0]->region;
+  //     printf("\toutputs[%d] mapped_region(%d,%d,%d)\n",
+  //            j,
+  //            handle.get_index_space().get_id(),
+  //            handle.get_field_space().get_id(),
+  //            handle.get_tree_id());
+  //   }
+  //   for (int j = 0; j < op->numWeights; j++) {
+  //     LogicalRegion handle = op->weights[j]->region;
+  //     printf("\tweights[%d] mapped_region(%d,%d,%d)\n",
+  //            j,
+  //            handle.get_index_space().get_id(),
+  //            handle.get_field_space().get_id(),
+  //            handle.get_tree_id());
+  //   }
+  // }
 }
 
 void InferenceManager::init_operators_inference(FFModel *model) {
@@ -542,7 +542,7 @@ void FFModel::compile_inference() {
     deserialize_graph_optimal_view(dez, best_graph, optimal_views);
     operators.clear();
     convert_graph_to_operators(best_graph, optimal_views);
-    best_graph->print_dot();
+    // best_graph->print_dot();
     delete best_graph;
     for (auto const &layer : layers) {
       // map inputs to parallel tensor

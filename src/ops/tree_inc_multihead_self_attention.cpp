@@ -643,8 +643,10 @@ TreeIncMultiHeadSelfAttentionMeta::TreeIncMultiHeadSelfAttentionMeta(
           gpu_mem_allocator.allocate_reserved<BatchConfig::CommittedTokensInfo>(
               committed_tokeninfo_size);
     } else {
-      gpu_mem_allocator.create_legion_instance(committed_token_reserve_inst,
-                                               total_size);
+      gpu_mem_allocator.create_legion_instance(
+          committed_token_reserve_inst,
+          total_size,
+          "TreeIncMultiHeadSelfAttentionMeta");
       committed_token_infos =
           gpu_mem_allocator.allocate_instance<BatchConfig::CommittedTokensInfo>(
               committed_tokeninfo_size);

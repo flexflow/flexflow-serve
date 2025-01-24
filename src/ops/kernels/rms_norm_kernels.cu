@@ -43,7 +43,8 @@ RMSNormMeta::RMSNormMeta(FFHandler handler,
   size_t rms_ptr_size = batch_size;
   size_t norm_ptr_size = num_elements;
   size_t totalSize = (rms_ptr_size + norm_ptr_size) * data_type_size(data_type);
-  gpu_mem_allocator.create_legion_instance(reserveInst, totalSize);
+  gpu_mem_allocator.create_legion_instance(
+      reserveInst, totalSize, "RMSNormMeta");
   rms_ptr = gpu_mem_allocator.allocate_instance_untyped(
       rms_ptr_size * data_type_size(data_type));
   norm_ptr = gpu_mem_allocator.allocate_instance_untyped(

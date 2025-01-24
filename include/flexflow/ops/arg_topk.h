@@ -18,7 +18,7 @@ public:
   bool renormalize;
   Realm::RegionInstance reserveInst;
   void *half_precision_output;
-  int max_input_size;
+  int max_output_size;
   std::unordered_map<cudaStream_t, raft::device_resources *> device_resources;
   ArgTopKMeta(FFHandler handle,
               Op const *op,

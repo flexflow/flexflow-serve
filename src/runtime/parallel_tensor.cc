@@ -1,4 +1,5 @@
 #include "flexflow/ffconst_utils.h"
+#include "flexflow/mapper.h"
 #include "flexflow/model.h"
 #include "flexflow/ops/attention.h"
 #include "flexflow/ops/concat.h"
@@ -19,6 +20,9 @@
 namespace FlexFlow {
 
 using namespace Legion;
+using namespace Legion;
+using namespace Mapping;
+Legion::Logger pt_logger("ParallelTensor");
 
 TensorBase::TensorBase(TensorBase const &rhs) {
   tensor_guid = rhs.tensor_guid;
@@ -647,11 +651,41 @@ bool ParallelTensorBase::is_valid_machine_view(MachineView const &view) const {
   return true;
 }
 
+size_t get_physical_region_size(PhysicalRegion const &pr,
+                                Context ctx,
+                                Runtime *runtime) {
+  // Get the logical region
+  LogicalRegion lr = pr.get_logical_region();
+
+  // Get the index space domain
+  Domain domain = runtime->get_index_space_domain(ctx, lr.get_index_space());
+
+  // Get number of elements in the domain
+  size_t num_elements = domain.get_volume();
+
+  // Get the field space
+  FieldSpace fs = lr.get_field_space();
+
+  // Get all fields in the field space
+  std::vector<FieldID> fields;
+  runtime->get_field_space_fields(ctx, fs, fields);
+
+  // Sum up the size of all fields
+  size_t total_field_size = 0;
+  for (FieldID fid : fields) {
+    size_t field_size = runtime->get_field_size(ctx, fs, fid);
+    total_field_size += field_size;
+  }
+
+  // Total size is number of elements times size of each element
+  return num_elements * total_field_size;
+}
+
 template <typename T>
 bool ParallelTensorBase::set_tensor(FFModel const *ff,
                                     std::vector<int> const &dim_sizes,
                                     T const *data) {
-  Context ctx = ff->config.lg_ctx;
+  Context ctx = Legion::Runtime::get_context();
   Runtime *runtime = ff->config.lg_hlr;
   // TODO: check data type matches
   // TODO: Currently we use a task launch, change to index launch for NCCL
@@ -678,6 +712,28 @@ bool ParallelTensorBase::set_tensor(FFModel const *ff,
   InlineLauncher launcher(req);
   PhysicalRegion pr = runtime->map_region(ctx, launcher);
   pr.wait_until_valid();
+
+  if (ff->config.log_instance_creation) {
+    size_t pr_size = get_physical_region_size(pr, ctx, runtime);
+    if (pr_size != volume * num_replicas * sizeof(T)) {
+      std::cout << "Physical region size: " << pr_size << std::endl;
+      std::cout << "Volume: " << volume << std::endl;
+      std::cout << "Num replicas: " << num_replicas << std::endl;
+      std::cout << "Size of T: " << sizeof(T) << std::endl;
+    }
+    assert(pr_size == volume * num_replicas * sizeof(T));
+    std::set<Memory> memories;
+    pr.get_memories(memories);
+    assert(memories.size() == 1);
+    Memory memory = *(memories.begin());
+    pt_logger.print("Created instance in memory_kind: %s memory_id: %llx size: "
+                    "%zu (capacity %lu) task_name: set_tensor",
+                    Legion::Mapping::Utilities::to_string(memory.kind()),
+                    memory.id,
+                    pr_size,
+                    memory.capacity());
+  }
+
   switch (num_dims) {
 #define DIMFUNC(DIM)                                                           \
   case DIM: {                                                                  \
@@ -704,7 +760,7 @@ template <typename T>
 bool ParallelTensorBase::get_tensor(FFModel const *ff,
                                     T *data,
                                     bool get_gradients) {
-  Context ctx = ff->config.lg_ctx;
+  Context ctx = Legion::Runtime::get_context();
   Runtime *runtime = ff->config.lg_hlr;
   LogicalRegion weight_lr = LogicalRegion::NO_REGION;
   if (sync_type == ParameterSyncType::PS) {

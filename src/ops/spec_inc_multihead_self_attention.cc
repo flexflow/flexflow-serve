@@ -204,6 +204,8 @@ Tensor FFModel::spec_inc_multiquery_self_attention(
   li->add_int_property("qk_prod_scaling", qk_prod_scaling);
   li->add_int_property("position_bias", position_bias);
   li->add_int_property("streaming_cache", streaming_cache);
+  li->add_int_property("tensor_parallelism_degree",
+                       config.tensor_parallelism_degree);
   layers.push_back(li);
   return li->outputs[0];
 }
@@ -255,6 +257,8 @@ Op *SpecIncMultiHeadSelfAttention::create_operator_from_layer(
   bool position_bias = (bool)value;
   layer->get_int_property("streaming_cache", value);
   bool streaming_cache = (bool)value;
+  layer->get_int_property("tensor_parallelism_degree", value);
+  int tensor_parallelism_degree = (int)value;
 
   return new SpecIncMultiHeadSelfAttention(model,
                                            layer->layer_guid,
@@ -275,6 +279,7 @@ Op *SpecIncMultiHeadSelfAttention::create_operator_from_layer(
                                            position_bias,
                                            false /*allocate_weights*/,
                                            streaming_cache,
+                                           tensor_parallelism_degree,
                                            layer->name);
 }
 
@@ -298,6 +303,7 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
     bool _position_bias,
     bool allocate_weights,
     bool _streaming_cache,
+    int _tensor_parallelism_degree,
     char const *name)
     // Initializer* _bias_initializer)
     : Op(model,
@@ -316,7 +322,8 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
       o_dim(_embed_dim), qoSeqLength(_input->dims[1].size),
       kvSeqLength(_input->dims[1].size), scaling_query(_scaling_query),
       scaling_factor(_scaling_factor), qk_prod_scaling(_qk_prod_scaling),
-      position_bias(_position_bias), streaming_cache(_streaming_cache) {
+      position_bias(_position_bias), streaming_cache(_streaming_cache),
+      tensor_parallelism_degree(_tensor_parallelism_degree) {
   // overwrite layer_guid
   layer_guid = _layer_guid;
 
@@ -399,6 +406,7 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
     bool _position_bias,
     bool allocate_weights,
     bool _streaming_cache,
+    int _tensor_parallelism_degree,
     char const *name)
     // Initializer* _bias_initializer)
     : Op(model,
@@ -418,7 +426,8 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
       o_dim(_embed_dim), qoSeqLength(_input->dims[1].size),
       kvSeqLength(_input->dims[1].size), scaling_query(_scaling_query),
       scaling_factor(_scaling_factor), qk_prod_scaling(_qk_prod_scaling),
-      position_bias(_position_bias), streaming_cache(_streaming_cache)
+      position_bias(_position_bias), streaming_cache(_streaming_cache),
+      tensor_parallelism_degree(_tensor_parallelism_degree)
 // bias_initializer(_bias_initializer)
 {
   numOutputs = 1;
@@ -508,6 +517,7 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
                                     other.position_bias,
                                     allocate_weights,
                                     other.streaming_cache,
+                                    other.tensor_parallelism_degree,
                                     other.name) {}
 
 SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
@@ -535,6 +545,7 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
                                     params.position_bias,
                                     allocate_weights,
                                     params.streaming_cache,
+                                    params.tensor_parallelism_degree,
                                     params.name) {}
 
 void SpecIncMultiHeadSelfAttention::init_inference(
@@ -660,8 +671,10 @@ OpMeta *SpecIncMultiHeadSelfAttention::init_task(
   int num_samples = input.domain.hi()[2] - input.domain.lo()[2] + 1;
   assert(attn->qoSeqLength == input.domain.hi()[1] - input.domain.lo()[1] + 1);
   assert(attn->kvSeqLength == input.domain.hi()[1] - input.domain.lo()[1] + 1);
-  int num_q_heads = attn->num_q_heads;
-  int num_kv_heads = attn->num_kv_heads;
+  int num_q_heads = attn->num_q_heads / attn->tensor_parallelism_degree;
+  int num_kv_heads =
+      attn->num_kv_heads / attn->tensor_parallelism_degree +
+      (attn->num_kv_heads % attn->tensor_parallelism_degree != 0);
   assert(attn->o_dim == output.domain.hi()[0] - output.domain.lo()[0] + 1);
 
   Memory gpu_mem = Machine::MemoryQuery(Machine::get_machine())
@@ -891,6 +904,7 @@ SpecIncMultiHeadSelfAttentionParams
   params.qk_prod_scaling = this->qk_prod_scaling;
   params.position_bias = this->position_bias;
   params.streaming_cache = this->streaming_cache;
+  params.tensor_parallelism_degree = this->tensor_parallelism_degree;
   if (this->name != nullptr) {
     strcpy(params.name, this->name);
   }
@@ -927,6 +941,7 @@ size_t hash<FlexFlow::SpecIncMultiHeadSelfAttentionParams>::operator()(
   hash_combine(key, params.qk_prod_scaling);
   hash_combine(key, params.position_bias);
   hash_combine(key, params.streaming_cache);
+  hash_combine(key, params.tensor_parallelism_degree);
   return key;
 }
 }; // namespace std

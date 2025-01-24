@@ -607,7 +607,7 @@ GumbelTopKMeta::GumbelTopKMeta(FFHandler handler,
       BatchConfig::MAX_NUM_TOKENS *
       max(BatchConfig::MAX_SPECULATIVE_TREE_BRANCHES, CUDA_NUM_THREADS);
   gpu_mem_allocator.create_legion_instance(
-      reserveInst, sizeof(curandState) * state_max_length);
+      reserveInst, sizeof(curandState) * state_max_length, "GumbelTopKMeta");
   state = gpu_mem_allocator.allocate_instance<curandState>(state_max_length);
 }
 

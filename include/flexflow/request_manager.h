@@ -237,6 +237,50 @@ struct Request {
   }
 };
 
+struct NewProfileInfo {
+  long long timestamp;
+  BatchConfig::RequestGuid request_guid;
+  int request_step_idx;
+  int num_speculated_tokens;
+  int num_accepted_tokens;
+  double speculation_score;
+  int num_generated_tokens;
+  long long speculation_start_timestamp;
+  long long speculation_end_timestamp;
+};
+struct RequestProfileInfo {
+  int llm_prefilling_steps = 0;
+  int ssm_prefilling_steps = 0;
+  int llm_decoding_steps = 0;
+  int ssm_decoding_steps = 0;
+  long long start_time = 0, start_decoding_time = 0, finish_time = 0;
+  long long speculation_start_timestamp;
+  long long speculation_end_timestamp;
+  std::vector<int> speculated_size_per_step;
+  std::vector<int> accepted_tokens_per_step;
+  std::vector<int> generated_tokens_per_step__;
+};
+struct ProfileInfo {
+  // For SpecInfer: One step is comprised of one ssm speculation phase + a
+  // single llm verification phase (forward pass + verification) For Incr
+  // Decoding: One step is one LLM decoding phase
+  long long llm_step_start = 0, ssm_step_start = 0;
+  // Times for each LLM verification phase (in ms)
+  std::vector<double> llm_step_times;
+  // Number of requests in batch at each step
+  std::vector<int> requests_per_step;
+  // Times for each SSM speculation phase (in ms)
+  std::vector<double> ssm_step_times;
+  // Number of requests getting decoded at each step
+  std::vector<int> ssm_steps;
+  std::vector<double> tree_operation_step_times;
+  // Number of generated tokens at each step
+  std::vector<int> generated_tokens_per_step;
+  // To calculate the E2E time of serving
+  long long server_start_time = 0;
+  long long server_end_time = 0;
+};
+
 class RequestManager {
 public:
   enum State {
@@ -291,6 +335,8 @@ public:
   void set_max_tree_depth(int max_tree_depth);
   int get_max_tree_width();
   void set_max_tree_width(int max_tree_width);
+  int get_expansion_degree();
+  void set_expansion_degree(int expansion_degree_);
   void set_speculative_sampling(bool speculative_sampling);
   void set_baseline_latency(double baseline_latency_ms);
   double get_baseline_latency();
@@ -309,15 +355,22 @@ public:
   void set_spec_infer_old_version(bool spec_infer_old_version);
   void set_greedy_schedule(bool greedy_schedule);
   void set_equal_schedule(bool equal_schedule);
+  void set_fcfs_slo(bool fcfs_slo);
+  void set_stta(bool stta);
   bool get_spec_infer_old_version();
   bool get_greedy_schedule();
   bool get_equal_schedule();
+  bool get_fcfs_slo();
+  bool get_stta();
+  inline double get_slo_constraint(Request &request);
+  void set_eval_overhead_breakdown(bool eval_overhead_breakdown);
+  bool get_eval_overhead_breakdown();
   double get_request_expected_latency(Request &request);
   Request &get_request_with_guid(RequestGuid guid);
   int register_ssm_model(FFModel *model);
   void register_tokenizer(ModelType model_type,
                           int bos_token_id,
-                          int eos_token_id,
+                          std::vector<int> eos_token_ids,
                           std::string const &path);
   std::vector<int32_t> tokenize(std::string const &text);
   void register_output_filepath(std::string const &);
@@ -337,6 +390,7 @@ public:
   static void terminate_background_server_at_exit();
   // Methods to check and mark request completion
   void trigger_request_completion_future(RequestGuid const &guid);
+  bool is_eos_token(TokenId token_id);
   static void background_serving_task(
       Legion::Task const *task,
       std::vector<Legion::PhysicalRegion> const &regions,
@@ -374,6 +428,12 @@ public:
   int get_num_active_requests();
   int get_empty_request_index();
 
+  std::unordered_map<RequestGuid, RequestProfileInfo> get_requests_profiling();
+  std::unordered_map<RequestGuid, GenerationResult>
+      get_request_generation_results();
+  ProfileInfo get_profiling_info();
+  std::vector<NewProfileInfo> get_new_profiling_info();
+
   // Comparters
   struct SharedTokenTreeNodePtrRequestGuidWeightedLess {
     bool operator()(
@@ -402,6 +462,7 @@ private:
   int max_tree_depth;
   int max_tree_width;
   int k;
+  int expansion_degree = 3;
   // Profile based latency
   double baseline_latency_ms = 43;
   double ssm_spec_latency_ms = 17;
@@ -420,14 +481,24 @@ private:
   bool spec_infer_old_version = false;
   bool greedy_schedule = false;
   bool equal_schedule = false;
+  bool fcfs_slo = false;
+  bool stta = false;                    // The smallest time to attain policy
+  bool eval_overhead_breakdown = false; // for evaluation purpose
+  double eval_ssm_prefill_latency_us = 0.0;
+  double eval_llm_prefill_latency_us = 0.0;
+  double eval_ssm_spec_latency_us = 0.0;
+  double eval_llm_verify_latency_us = 0.0;
+  double eval_process_latency_us = 0.0;
+  double eval_schedule_latency_us = 0.0;
+  double eval_other_latency_us = 0.0; // load pending request, request complete
 
   std::unique_ptr<Tokenizer> tokenizer_;
   bool verbose;
   ModelType model_type;
   int bos_token_id;
-  int eos_token_id;
+  std::vector<int> eos_token_ids;
   bool old_llama_tokenizer = false;
-  std::string output_filepath;
+  std::string output_filepath, csv_filepath;
   std::queue<Request> pending_request_queue;
   std::unordered_map<RequestGuid, Request> all_requests;
   std::unordered_map<RequestGuid, GenerationResult> request_generation_results;
@@ -466,34 +537,9 @@ private:
   // TODO: maintain this field
   size_t num_processed_requests;
 
-  struct RequestProfileInfo {
-    int llm_prefilling_steps = 0;
-    int ssm_prefilling_steps = 0;
-    int llm_decoding_steps = 0;
-    int ssm_decoding_steps = 0;
-    long long start_time = 0, start_decoding_time = 0, finish_time = 0;
-  };
-  struct ProfileInfo {
-    // For SpecInfer: One step is comprised of one ssm speculation phase + a
-    // single llm verification phase (forward pass + verification) For Incr
-    // Decoding: One step is one LLM decoding phase
-    long long llm_step_start = 0, ssm_step_start = 0;
-    // Times for each LLM verification phase (in ms)
-    std::vector<double> llm_step_times;
-    // Number of requests in batch at each step
-    std::vector<int> requests_per_step;
-    // Times for each SSM speculation phase (in ms)
-    std::vector<double> ssm_step_times;
-    // Number of requests getting decoded at each step
-    std::vector<int> ssm_steps;
-    // Number of generated tokens at each step
-    std::vector<int> generated_tokens_per_step;
-    // To calculate the E2E time of serving
-    long long server_start_time = 0;
-  };
-
   ProfileInfo profiling;
   std::unordered_map<RequestGuid, RequestProfileInfo> profiling_requests;
+  std::vector<NewProfileInfo> new_profiling_info;
   double total_request_run_time;
   bool load_pending_request_to_batch();
   void request_update_attainment(int index, bool attained);
@@ -505,6 +551,8 @@ private:
   bool update_llm_decode_results(InferenceResult const &result);
   BatchConfig prepare_llm_prefilling_batch();
   BatchConfig prepare_decoding_batch();
+  BatchConfig prepare_decoding_batch_fcfs_slo();
+  BatchConfig prepare_decoding_batch_stta();
   /* ---------- Incremental Decoding Helper Functions ---------- */
 
   /* ---------- Spec Decoding Helper Functions ---------- */
