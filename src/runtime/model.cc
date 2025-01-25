@@ -4533,6 +4533,20 @@ void register_flexflow_internal_tasks(Runtime *runtime,
           registrar);
     }
   }
+  {
+    TaskVariantRegistrar registrar(LOAD_WEIGHT_TASK_ID, "load_weight_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (pre_register) {
+      Runtime::preregister_task_variant<FileDataLoader::load_weight_task>(
+          registrar, "load_weight_task");
+    } else {
+      if (enable_control_replication) {
+        registrar.global_registration = false;
+      }
+      runtime->register_task_variant<FileDataLoader::load_weight_task>(
+          registrar);
+    }
+  }
   // ElementUnary task
   {
     TaskVariantRegistrar registrar(ELEMENTUNARY_INIT_TASK_ID,

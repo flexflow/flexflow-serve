@@ -292,6 +292,10 @@ void FFMapper::select_task_options(MapperContext const ctx,
     output.initial_proc = all_cpus[0];
     return;
   }
+  if (task.task_id == LOAD_WEIGHT_TASK_ID) {
+    output.initial_proc = all_cpus[0];
+    return;
+  }
   if (task.task_id == TOP_LEVEL_TASK_ID) {
     output.initial_proc = all_cpus[0];
     // control replicate top level task

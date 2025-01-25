@@ -620,14 +620,21 @@ void load_from_quantized_file(char *ptr,
 
 void FileDataLoader::load_quantization_weight(FFModel *ff,
                                               Layer *l,
-                                              int weight_idx) {
-  Tensor weight = l->weights[weight_idx];
-  size_t volume = 1;
+                                              int weight_idx,
+                                              size_t volume,
+                                              size_t num_replicas,
+                                              char *weight,
+                                              DataType data_type,
+                                              Domain weight_domain) {
+  // Tensor weight = l->weights[weight_idx];
+  size_t volume_ = 1;
   std::vector<int> dims_vec;
-  for (int i = 0; i < weight->num_dims; i++) {
-    dims_vec.push_back(weight->dims[i]);
-    volume *= weight->dims[i];
+  for (int i = 0; i < weight_domain.get_dim(); i++) {
+    int dim_i = weight_domain.hi()[i] - weight_domain.lo()[i] + 1;
+    dims_vec.push_back(dim_i);
+    volume_ *= dim_i;
   }
+  assert(volume_ == volume * num_replicas);
   char *data = (char *)malloc(sizeof(char) * volume);
 
   std::string weight_filename = removeGuidOperatorName(std::string(l->name));
@@ -642,7 +649,7 @@ void FileDataLoader::load_quantization_weight(FFModel *ff,
                                        head_dim,
                                        weight_filename,
                                        weights_folder,
-                                       weight->data_type,
+                                       data_type,
                                        use_full_precision);
     }
     // else {
@@ -664,13 +671,18 @@ void FileDataLoader::load_quantization_weight(FFModel *ff,
     load_from_quantized_file(data,
                              volume,
                              join_path({weights_folder, weight_filename}),
-                             weight->data_type,
+                             data_type,
                              use_full_precision);
   }
 
-  ParallelTensor weight_pt;
-  ff->get_parallel_tensor_from_tensor(weight, weight_pt);
-  weight_pt->set_tensor<char>(ff, dims_vec, data);
+  // ParallelTensor weight_pt;
+  // ff->get_parallel_tensor_from_tensor(weight, weight_pt);
+  // weight_pt->set_tensor<char>(ff, dims_vec, data);
+  char *ptr = weight;
+  for (size_t i = 0; i < num_replicas; i++) {
+    memcpy(ptr, data, volume * sizeof(char));
+    ptr += volume;
+  }
 
   free(data);
 }
@@ -678,17 +690,22 @@ void FileDataLoader::load_quantization_weight(FFModel *ff,
 template <typename DT>
 void FileDataLoader::load_single_weight_tensor(FFModel *ff,
                                                Layer *l,
-                                               int weight_idx) {
-  Tensor weight = l->weights[weight_idx];
+                                               int weight_idx,
+                                               size_t volume,
+                                               size_t num_replicas,
+                                               DT *weight,
+                                               Domain weight_domain) {
 
   // Create a buffer to store weight data from the file
-  size_t volume = 1;
+  size_t volume_ = 1;
   std::vector<int> dims_vec;
-  for (int i = 0; i < weight->num_dims; i++) {
-    dims_vec.push_back(weight->dims[i]);
-    volume *= weight->dims[i];
+  for (int i = 0; i < weight_domain.get_dim(); i++) {
+    int dim_i = weight_domain.hi()[i] - weight_domain.lo()[i] + 1;
+    dims_vec.push_back(dim_i);
+    volume_ *= dim_i;
   }
-  assert(data_type_size(weight->data_type) == sizeof(DT));
+  assert(volume_ == volume * num_replicas);
+  // assert(data_type_size(weight->data_type) == sizeof(DT));
   DT *data = (DT *)malloc(sizeof(DT) * volume);
 
   std::string weight_filename = removeGuidOperatorName(std::string(l->name));
@@ -758,40 +775,124 @@ void FileDataLoader::load_single_weight_tensor(FFModel *ff,
     }
   }
 
-  // Copy the weight data from the buffer to the weight's ParallelTensor
-  ParallelTensor weight_pt;
-  ff->get_parallel_tensor_from_tensor(weight, weight_pt);
-  weight_pt->set_tensor<DT>(ff, dims_vec, data);
+  // Copy the weight data from the buffer to the weight
+  DT *ptr = weight;
+  for (size_t i = 0; i < num_replicas; i++) {
+    memcpy(ptr, data, volume * sizeof(DT));
+    ptr += volume;
+  }
 
   // Free buffer memory
   free(data);
 }
 
-void FileDataLoader::load_weights(FFModel *ff) {
+void FileDataLoader::load_weight_task(
+    Legion::Task const *task,
+    std::vector<Legion::PhysicalRegion> const &regions,
+    Legion::Context ctx,
+    Legion::Runtime *runtime) {
+  WeightLoadTaskArgs const *args = (WeightLoadTaskArgs const *)task->args;
+
+  assert(task->regions.size() == regions.size());
+  assert(regions.size() == 1); // one weight only
+  GenericTensorAccessorW weight = helperGetGenericTensorAccessorWO(
+      args->data_type, regions[0], task->regions[0], FID_DATA, ctx, runtime);
+  Domain weight_domain = runtime->get_index_space_domain(
+      ctx, task->regions[0].region.get_index_space());
+
+  switch (args->data_type) {
+    case DT_HALF: {
+      args->loader->load_single_weight_tensor<half>(args->ff,
+                                                    args->layer,
+                                                    args->weight_idx,
+                                                    args->volume,
+                                                    args->num_replicas,
+                                                    weight.get_half_ptr(),
+                                                    weight_domain);
+      break;
+    }
+    case DT_FLOAT: {
+      args->loader->load_single_weight_tensor<float>(args->ff,
+                                                     args->layer,
+                                                     args->weight_idx,
+                                                     args->volume,
+                                                     args->num_replicas,
+                                                     weight.get_float_ptr(),
+                                                     weight_domain);
+      break;
+    }
+    case DT_INT4:
+    case DT_INT8: {
+      args->loader->load_quantization_weight(args->ff,
+                                             args->layer,
+                                             args->weight_idx,
+                                             args->volume,
+                                             args->num_replicas,
+                                             weight.get_byte_ptr(),
+                                             args->data_type,
+                                             weight_domain);
+      break;
+    }
+    default:
+      assert(false && "Unsupported data type");
+  }
+}
+
+
+void FileDataLoader::load_weights_parallel(FFModel *ff,
+                                           Context ctx,
+                                           Runtime *runtime) {
+  std::vector<Future> futures;
+
   for (Layer *l : ff->layers) {
     if (l->numWeights < 1 || l->name == NULL || strlen(l->name) < 1) {
       continue;
     }
+
     for (int i = 0; i < l->numWeights; i++) {
       Tensor weight = l->weights[i];
       if (weight == NULL) {
         continue;
       }
-      switch (weight->data_type) {
-        case DT_HALF:
-          load_single_weight_tensor<half>(ff, l, i);
-          break;
-        case DT_FLOAT:
-          load_single_weight_tensor<float>(ff, l, i);
-          break;
-        case DT_INT4:
-        case DT_INT8:
-          // load weights in quantization
-          load_quantization_weight(ff, l, i);
-          break;
-        default:
-          assert(false && "Unsupported data type");
+
+      if (weight->data_type != DT_FLOAT && weight->data_type != DT_HALF &&
+          weight->data_type != DT_INT4 && weight->data_type != DT_INT8) {
+        assert(false && "Unsupported data type");
       }
+
+      ParallelTensor weight_pt;
+      ff->get_parallel_tensor_from_tensor(weight, weight_pt);
+
+      // Create task arguments
+      size_t volume = 1, num_replicas = 1;
+      if (weight_pt->sync_type == ParameterSyncType::NCCL) {
+        for (int i = 0; i < weight_pt->num_dims; i++) {
+          if (weight_pt->dims[i].is_replica_dim) {
+            num_replicas *= weight_pt->dims[i].size;
+          }
+        }
+      } else if (weight_pt->sync_type == ParameterSyncType::PS) {
+        num_replicas = 1;
+      } else {
+        num_replicas = 1;
+      }
+      for (int i = 0; i < weight->num_dims; i++) {
+        volume *= weight->dims[i];
+      }
+      WeightLoadTaskArgs args(
+          ff, this, l, i, volume, num_replicas, weight->data_type);
+      // launch task asynchronously
+      TaskLauncher launcher(LOAD_WEIGHT_TASK_ID,
+                            TaskArgument(&args, sizeof(WeightLoadTaskArgs)));
+      launcher.add_region_requirement(RegionRequirement(
+          weight_pt->region, WRITE_ONLY, EXCLUSIVE, weight_pt->region));
+      launcher.add_field(0, FID_DATA);
+      futures.push_back(runtime->execute_task(ctx, launcher));
     }
+  }
+
+  // Wait for all tasks to complete
+  for (Future &f : futures) {
+    f.get_void_result();
   }
 }
