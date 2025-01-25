@@ -3393,6 +3393,7 @@ void FFModel::create_operators_from_layers() {
                config.tensor_parallelism_degree > 1 &&
                (l->op_type == OP_INC_MULTIHEAD_SELF_ATTENTION ||
                 l->op_type == OP_TREE_INC_MULTIHEAD_SELF_ATTENTION ||
+                l->op_type == OP_SPEC_INC_MULTIHEAD_SELF_ATTENTION ||
                 // mlp layer
                 is_mlp_block(layer_idx) ||
                 // llama mlp layer
