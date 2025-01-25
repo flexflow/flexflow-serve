@@ -43,6 +43,7 @@ public:
                                 bool _position_bias,
                                 bool allocate_weights,
                                 bool _streaming_cache,
+                                int _tensor_parallelism_degree,
                                 char const *name);
   SpecIncMultiHeadSelfAttention(FFModel &model,
                                 ParallelTensor const _input,
@@ -63,6 +64,7 @@ public:
                                 bool _position_bias,
                                 bool allocate_weights,
                                 bool _streaming_cache,
+                                int _tensor_parallelism_degree,
                                 char const *name);
   SpecIncMultiHeadSelfAttention(FFModel &model,
                                 SpecIncMultiHeadSelfAttention const &other,

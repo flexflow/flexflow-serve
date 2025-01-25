@@ -2388,6 +2388,7 @@ GraphOptimalViewSerialized
         sez.serialize(attn->position_bias);
         sez.serialize(attn->streaming_cache);
         sez.serialize(attn->num_kv_heads);
+        sez.serialize(attn->tensor_parallelism_degree);
         sez.serialize(strlen(attn->name));
         sez.serialize(attn->name, strlen(attn->name));
         break;
@@ -2903,7 +2904,8 @@ void FFModel::deserialize_graph_optimal_view(
       }
       case OP_SPEC_INC_MULTIHEAD_SELF_ATTENTION: {
         assert(num_inputs == 1);
-        int embed_dim, num_q_heads, k_dim, v_dim, num_kv_heads;
+        int embed_dim, num_q_heads, k_dim, v_dim, num_kv_heads,
+            tensor_parallelism_degree;
         float dropout, scaling_factor;
         bool qkv_bias, final_bias, add_zero_attn, apply_rotary_embedding,
             scaling_query, qk_prod_scaling, position_bias, streaming_cache;
@@ -2938,6 +2940,7 @@ void FFModel::deserialize_graph_optimal_view(
         dez.deserialize(position_bias);
         dez.deserialize(streaming_cache);
         dez.deserialize(num_kv_heads);
+        dez.deserialize(tensor_parallelism_degree);
         size_t name_len;
         char name[MAX_OPNAME] = {0};
         dez.deserialize(name_len);
@@ -2960,6 +2963,7 @@ void FFModel::deserialize_graph_optimal_view(
         params.position_bias = position_bias;
         params.streaming_cache = streaming_cache;
         params.num_kv_heads = num_kv_heads;
+        params.tensor_parallelism_degree = tensor_parallelism_degree;
         strcpy(params.name, name);
         node = get_or_create_node<SpecIncMultiHeadSelfAttention>(inputs[0],
                                                                  params);
