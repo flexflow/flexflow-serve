@@ -122,6 +122,7 @@ RequestManager::RequestManager()
   max_spec_tree_token_num = -1;
   max_sequence_length = -1;
   max_output_length = -1;
+  max_kv_cache_size = 0;
   max_tree_depth = -1;
   max_tree_width = -1;
   k = -1;
@@ -201,6 +202,14 @@ void RequestManager::set_max_output_length(int max_output_length) {
 int RequestManager::get_max_output_length() {
   assert(max_output_length > 0);
   return max_output_length;
+}
+
+void RequestManager::set_max_kv_cache_size(size_t max_kv_cache_size) {
+  this->max_kv_cache_size = max_kv_cache_size;
+}
+
+size_t RequestManager::get_max_kv_cache_size() {
+  return max_kv_cache_size;
 }
 
 void RequestManager::set_decoding_mode(DecodingMode mode) {
@@ -828,6 +837,7 @@ void RequestManager::request_complete_clean_up(int batch_index) {
     request_complete_start = Realm::Clock::current_time_in_microseconds();
   }
   RequestGuid guid = guid_of_requests[batch_index];
+
   profiling_requests[guid].finish_time =
       Realm::Clock::current_time_in_microseconds();
   Request &request = all_requests[guid];
@@ -1288,7 +1298,6 @@ BatchConfig RequestManager::prepare_llm_prefilling_batch() {
   int num_tokens = 0;
   for (Request *request : prefilling_requests) {
     int request_index = request->batch_index;
-    bc.request_available[request_index] = true;
 
     assert(request->status == Request::RUNNING);
 
@@ -1323,6 +1332,7 @@ BatchConfig RequestManager::prepare_llm_prefilling_batch() {
     num_tokens += num_tokens_in_batch;
     if (num_tokens_in_batch > 0) {
       bc.num_available_requests++;
+      bc.request_available[request_index] = true;
     }
 
     // Record prefilling start time. We don't do this for speculative decoding,
@@ -1365,8 +1375,6 @@ BatchConfig RequestManager::prepare_ssm_prefilling_batch() {
   int num_tokens = 0;
   for (Request *request : prefilling_requests) {
     int request_index = request->batch_index;
-    // Only set the prefilling request to be available
-    bc.request_available[request_index] = true;
 
     // Request Info
     bc.requestsInfo[request_index].first_token_offset_in_batch = num_tokens;
@@ -1399,6 +1407,8 @@ BatchConfig RequestManager::prepare_ssm_prefilling_batch() {
     num_tokens += num_tokens_in_batch;
     if (num_tokens_in_batch > 0) {
       bc.num_available_requests++;
+      // Only set the prefilling request to be available
+      bc.request_available[request_index] = true;
     }
 
     // Record prefilling start time
@@ -3084,6 +3094,7 @@ void RequestManager::terminate_background_server() {
       double latency_ms = (profiling_info.second.finish_time -
                            profiling_info.second.start_time) /
                           1000.0;
+
       // latency_per_request_ms += "[" + std::to_string(profiling_info.first)
       // +
       // ","; latency_per_request_ms += std::to_string(latency_ms) + "] ";

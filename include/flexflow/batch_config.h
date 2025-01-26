@@ -77,6 +77,7 @@ public:
   static int max_spec_tree_token_num();
   static int max_sequence_length();
   static int max_output_length();
+  static size_t max_kv_cache_size();
   static bool streaming_cache();
   static int get_max_tree_depth();
   friend std::ostream &operator<<(std::ostream &os, BatchConfig const &bc);
@@ -113,7 +114,13 @@ public:
     int first_token_index_in_request = -1;
     int first_token_offset_in_batch = -1;
     int num_tokens_in_batch = 0;
-    int padding = 0; // Padding for memory pointer alignment
+    RequestGuid request_guid;
+
+    static constexpr size_t request_guid_size = sizeof(RequestGuid);
+    static constexpr size_t alignment = 16;
+    static constexpr size_t padding_size = (alignment - (sizeof(int) * 3 + request_guid_size) % alignment) % alignment;
+    static constexpr size_t padding_length = padding_size / sizeof(int);
+    int padding[padding_length] = {}; // Padding for memory pointer alignment
   };
 
   struct PerTokenInfo {

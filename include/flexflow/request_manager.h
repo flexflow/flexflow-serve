@@ -316,6 +316,8 @@ public:
   int get_max_spec_tree_token_num();
   void set_max_sequence_length(int max_seq_length);
   int get_max_sequence_length();
+  void set_max_kv_cache_size(size_t max_kv_cache_size);
+  size_t get_max_kv_cache_size();
   void set_max_output_length(int max_output_length);
   int get_max_output_length();
   void set_decoding_mode(DecodingMode mode);
@@ -449,6 +451,7 @@ private:
   int max_spec_tree_token_num;
   int max_sequence_length;
   int max_output_length;
+  size_t max_kv_cache_size;
   int max_tree_depth;
   int max_tree_width;
   int k;
