@@ -1305,7 +1305,6 @@ BatchConfig RequestManager::prepare_llm_prefilling_batch() {
   int num_tokens = 0;
   for (Request *request : prefilling_requests) {
     int request_index = request->batch_index;
-    bc.request_available[request_index] = true;
 
     assert(request->status == Request::RUNNING);
 
@@ -1343,6 +1342,7 @@ BatchConfig RequestManager::prepare_llm_prefilling_batch() {
     num_tokens += num_tokens_in_batch;
     if (num_tokens_in_batch > 0) {
       bc.num_available_requests++;
+      bc.request_available[request_index] = true;
     }
     bc.requestsInfo[request_index].request_guid = request->guid;
 
@@ -2006,7 +2006,6 @@ BatchConfig RequestManager::prepare_verify_batch_config() {
       new_bc.committed_tokens[new_bc.num_tokens_to_commit].token_depth =
           idx_to_physical;
       new_bc.num_tokens_to_commit++;
-      // also append the token to the block
     }
 
     // Load the tokens on the token tree that are not yet pruned to

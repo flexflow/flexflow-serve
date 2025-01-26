@@ -115,24 +115,13 @@ void prepare_inference_params_kernel_h(BatchConfig const *batch_config,
       for (int i = indices_offset; i < indices_lens; i++) {
         kv_indices_h[i] = kv_indices[i - indices_offset];
       }
+      kv_last_page_len_h[indptr_idx] = (kv_len - 1) % kPagesize + 1;
       qk_indptr_h[indptr_idx + 1] = qk_lens;
-      kv_last_page_len_h[indptr_idx] =
-          batch_config->requestsInfo[req_idx].kv_last_page_len;
       indptr_idx++;
     }
   }
 
   // do the copy
-  checkCUDA(cudaMemcpyAsync(attention_metadata->kv_indices,
-                            kv_indices_h,
-                            sizeof(int32_t) * batch_size * max_num_pages,
-                            cudaMemcpyHostToDevice,
-                            stream));
-  checkCUDA(cudaMemcpyAsync(attention_metadata->kv_last_page_len,
-                            kv_last_page_len_h,
-                            sizeof(int32_t) * batch_size,
-                            cudaMemcpyHostToDevice,
-                            stream));
   checkCUDA(cudaMemcpyAsync(attention_metadata->q_indptr,
                             q_indptr_h,
                             sizeof(int32_t) * (batch_size + 1),
@@ -141,6 +130,16 @@ void prepare_inference_params_kernel_h(BatchConfig const *batch_config,
   checkCUDA(cudaMemcpyAsync(attention_metadata->kv_indptr,
                             kv_indptr_h,
                             sizeof(int32_t) * (batch_size + 1),
+                            cudaMemcpyHostToDevice,
+                            stream));
+  checkCUDA(cudaMemcpyAsync(attention_metadata->kv_indices,
+                            kv_indices_h,
+                            sizeof(int32_t) * batch_size * max_num_pages,
+                            cudaMemcpyHostToDevice,
+                            stream));
+  checkCUDA(cudaMemcpyAsync(attention_metadata->kv_last_page_len,
+                            kv_last_page_len_h,
+                            sizeof(int32_t) * batch_size,
                             cudaMemcpyHostToDevice,
                             stream));
   checkCUDA(cudaMemcpyAsync(attention_metadata->qk_indptr,
