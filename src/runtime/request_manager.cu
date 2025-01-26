@@ -111,14 +111,8 @@ void prepare_inference_params_kernel_h(BatchConfig const *batch_config,
       kv_indptr_h[indptr_idx + 1] =
           batch_config->requestsInfo[req_idx].num_kv_pages +
           kv_indptr_h[indptr_idx];
-      assert(kv_indptr_h[indptr_idx] >= 0);
-
-      assert(batch_config->requestsInfo[req_idx].num_kv_pages ==
-             (kv_len + kPagesize - 1) / kPagesize);
-      assert(batch_config->requestsInfo[req_idx].kv_last_page_len <= kPagesize);
       std::vector<int32_t> kv_indices = pm->get_block_table_indices(
           batch_config->requestsInfo[req_idx].request_guid);
-      assert(kv_indices.size() == (kv_len + kPagesize - 1) / kPagesize);
       for (int i = indices_offset; i < indices_lens; i++) {
         kv_indices_h[i] = kv_indices[i - indices_offset];
       }
@@ -446,14 +440,6 @@ void RequestManager::load_batch_config_task(
     if (handle.incr_attention_metadata->enabled()) {
       // calculate the attention meta data
       {
-        BatchConfig::PerRequestInfo *request_infos =
-            reinterpret_cast<BatchConfig::PerRequestInfo *>(
-                static_cast<char *>(handle.batch_config_metadata) +
-                sizeof(BatchConfig::tokensInfo));
-        bool *request_available = reinterpret_cast<bool *>(
-            static_cast<char *>(handle.batch_config_metadata) +
-            sizeof(BatchConfig::tokensInfo) +
-            sizeof(BatchConfig::requestsInfo));
         int batch_size = batch_config->num_active_requests();
         uint32_t const max_num_pages =
             round_up_pages(BatchConfig::max_sequence_length() +

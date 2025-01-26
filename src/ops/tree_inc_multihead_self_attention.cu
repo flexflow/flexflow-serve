@@ -49,8 +49,6 @@ using flashinfer::QKVLayout;
 
 __global__ void commit_tokens_kernel(
     half *kCache_ptr,
-    int32_t *kv_indptr,
-    int32_t *kv_page_indices,
     BatchConfig::CommittedTokensInfo const *committedTokenInfos,
     bool const *request_available,
     int num_requests,
@@ -128,8 +126,6 @@ void commit_tokens(TreeIncMultiHeadSelfAttentionMeta const *m,
                          0,
                          stream>>>(
       static_cast<half *>(m->kvCache),
-      m->handle.tree_verify_attention_metadata->kv_indptr,
-      m->handle.tree_verify_attention_metadata->kv_indices,
       m->committed_token_infos,
       m->request_available,
       num_requests,

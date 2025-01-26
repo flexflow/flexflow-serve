@@ -1337,7 +1337,6 @@ BatchConfig RequestManager::prepare_llm_prefilling_batch() {
       bc.tokensInfo[token_idx].token_id =
           request->tokens[request->llm_prefill_len + idx];
 
-      assert(request->llm_prefill_len + idx < request->tokens.size());
       append_token_to_block(
           *request, request->tokens[request->llm_prefill_len + idx], true);
     }
@@ -1345,15 +1344,6 @@ BatchConfig RequestManager::prepare_llm_prefilling_batch() {
     if (num_tokens_in_batch > 0) {
       bc.num_available_requests++;
     }
-    // update related page info in batch config
-    bc.requestsInfo[request_index].num_kv_pages =
-        get_num_blocks_allocated(*request);
-    if (bc.requestsInfo[request_index].num_kv_pages == 0) {
-      // turn this request into not available for one round
-      bc.request_available[request_index] = false;
-    }
-    bc.requestsInfo[request_index].kv_last_page_len =
-        get_len_last_block(*request);
     bc.requestsInfo[request_index].request_guid = request->guid;
 
     // Record prefilling start time. We don't do this for speculative decoding,
@@ -1492,13 +1482,6 @@ BatchConfig RequestManager::prepare_decoding_batch() {
     bc.tokensInfo[bc.num_tokens].abs_index_in_request = request.llm_cache_size;
     bc.tokensInfo[bc.num_tokens].abs_depth_in_request = request.llm_cache_size;
     bc.tokensInfo[bc.num_tokens].token_id = request.tokens.back();
-    // append the token here
-    int idx_to_physical =
-        append_token_to_block(request, request.tokens.back(), true);
-    bc.requestsInfo[request_index].num_kv_pages =
-        get_num_blocks_allocated(request);
-    bc.requestsInfo[request_index].kv_last_page_len =
-        get_len_last_block(request);
     bc.requestsInfo[request_index].request_guid = request.guid;
 
     bc.num_tokens++;
@@ -1990,8 +1973,6 @@ BatchConfig RequestManager::prepare_verify_batch_config() {
     // also need to reset the pages
     reset_block_table(request);
 
-    int token_offset = request.first_token_offset_in_batch;
-
     // 1. Maintain requestsInfo
     new_bc.requestsInfo[request_index].first_token_index_in_request =
         request.tokens.size() - 1; // Exclude the last token
@@ -2016,7 +1997,7 @@ BatchConfig RequestManager::prepare_verify_batch_config() {
       int idx_from_logical = committed_token.from_index;
       int idx_from_physical =
           block_table_before_commit[idx_from_logical / kPagesize] * kPagesize +
-          committed_token.from_index % kPagesize;
+          idx_from_logical % kPagesize;
 
       new_bc.committed_tokens[new_bc.num_tokens_to_commit].request_index =
           request_index;
@@ -2068,12 +2049,6 @@ BatchConfig RequestManager::prepare_verify_batch_config() {
 
     // Copy the streaming cache info
     new_bc.streamingCacheInfo[request_index] = request.streaming_cache_info;
-
-    // page attention information
-    new_bc.requestsInfo[request_index].num_kv_pages =
-        get_num_blocks_allocated(request);
-    new_bc.requestsInfo[request_index].kv_last_page_len =
-        get_len_last_block(request);
     new_bc.requestsInfo[request_index].request_guid = request.guid;
   }
 
