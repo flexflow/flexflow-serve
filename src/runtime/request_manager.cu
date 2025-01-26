@@ -78,6 +78,7 @@ void RequestManager::load_tokens_task(
 }
 
 void prepare_inference_params_kernel_h(BatchConfig const *batch_config,
+                                       PageManager *pm,
                                        AttentionMetaData *attention_metadata,
                                        cudaStream_t stream,
                                        uint32_t const max_num_pages,
@@ -109,8 +110,10 @@ void prepare_inference_params_kernel_h(BatchConfig const *batch_config,
       q_indptr_h[indptr_idx + 1] = q_indptr_h[indptr_idx] + q_len;
       kv_indptr_h[indptr_idx + 1] = round_up_pages(kv_len) +
           kv_indptr_h[indptr_idx];
+      std::vector<int32_t> kv_indices = pm->get_block_table_indices(
+          batch_config->requestsInfo[req_idx].request_guid);
       for (int i = indices_offset; i < indices_lens; i++) {
-        kv_indices_h[i] = max_num_pages * req_idx + (i - indices_offset);
+        kv_indices_h[i] = kv_indices[i - indices_offset];
       }
       kv_last_page_len_h[indptr_idx] = (kv_len - 1) % kPagesize + 1;
       qk_indptr_h[indptr_idx + 1] = qk_lens;
@@ -425,6 +428,7 @@ void RequestManager::load_batch_config_task(
 
   // load attention metadata
   if (batch_config->get_mode() == INC_DECODING_MODE) {
+    PageManager *pm = PageManager::get_page_manager();
     static int32_t q_indptr_h[BatchConfig::MAX_NUM_REQUESTS + 1],
         kv_indptr_h[BatchConfig::MAX_NUM_REQUESTS + 1];
     static int32_t kv_indices_h[BatchConfig::MAX_NUM_REQUESTS *
@@ -434,20 +438,13 @@ void RequestManager::load_batch_config_task(
     if (handle.incr_attention_metadata->enabled()) {
       // calculate the attention meta data
       {
-        BatchConfig::PerRequestInfo *request_infos =
-            reinterpret_cast<BatchConfig::PerRequestInfo *>(
-                static_cast<char *>(handle.batch_config_metadata) +
-                sizeof(BatchConfig::tokensInfo));
-        bool *request_available = reinterpret_cast<bool *>(
-            static_cast<char *>(handle.batch_config_metadata) +
-            sizeof(BatchConfig::tokensInfo) +
-            sizeof(BatchConfig::requestsInfo));
         int batch_size = batch_config->num_active_requests();
         uint32_t const max_num_pages =
             round_up_pages(BatchConfig::max_sequence_length() +
                            BatchConfig::max_spec_tree_token_num());
 
         prepare_inference_params_kernel_h(batch_config,
+                                          pm,
                                           handle.incr_attention_metadata,
                                           stream,
                                           max_num_pages,
@@ -650,6 +647,7 @@ void RequestManager::load_batch_config_task(
       }
     }
   } else if (batch_config->get_mode() == TREE_VERIFY_MODE) {
+    PageManager *pm = PageManager::get_page_manager();
     static int32_t q_indptr_h[BatchConfig::MAX_NUM_REQUESTS + 1],
         kv_indptr_h[BatchConfig::MAX_NUM_REQUESTS + 1];
     static int32_t kv_indices_h[BatchConfig::MAX_NUM_REQUESTS *
@@ -687,6 +685,7 @@ void RequestManager::load_batch_config_task(
 
         // int parallelism = batch_size;
         prepare_inference_params_kernel_h(batch_config,
+                                          pm,
                                           handle.tree_verify_attention_metadata,
                                           stream,
                                           max_num_pages,

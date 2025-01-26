@@ -49,8 +49,6 @@ using flashinfer::QKVLayout;
 
 __global__ void commit_tokens_kernel(
     half *kCache_ptr,
-    int32_t *kv_indptr,
-    int32_t *kv_page_indices,
     BatchConfig::CommittedTokensInfo const *committedTokenInfos,
     bool const *request_available,
     int num_requests,
@@ -79,10 +77,9 @@ __global__ void commit_tokens_kernel(
         continue;
       }
 
-      int const start = kv_indptr[request_compact_idx];
-      int const page_to_idx = kv_page_indices[start + committedTokenInfos[i].token_depth / kPagesize];
+      int const page_to_idx = committedTokenInfos[i].token_depth / kPagesize;
       int const page_from_idx =
-          kv_page_indices[start + committedTokenInfos[i].index_in_kv_cache / kPagesize];
+          committedTokenInfos[i].index_in_kv_cache / kPagesize;
 
       size_t from_k_idx = get_k_entry_offset_verify(
                  committedTokenInfos[i].index_in_kv_cache,
@@ -129,8 +126,6 @@ void commit_tokens(TreeIncMultiHeadSelfAttentionMeta const *m,
                          0,
                          stream>>>(
       static_cast<half *>(m->kvCache),
-      m->handle.tree_verify_attention_metadata->kv_indptr,
-      m->handle.tree_verify_attention_metadata->kv_indices,
       m->committed_token_infos,
       m->request_available,
       num_requests,

@@ -22,6 +22,7 @@
 #include "flexflow/ops/kernels/decompress_kernels.h"
 #include "flexflow/ops/kernels/inc_multihead_self_attention_kernels.h"
 #include "flexflow/ops/kernels/inc_multihead_self_attention_utils.cuh"
+#include "flexflow/page_manager.h"
 #include "flexflow/utils/cuda_helper.h"
 #include <math_constants.h>
 
@@ -494,9 +495,26 @@ IncMultiHeadSelfAttentionMeta::IncMultiHeadSelfAttentionMeta(
     size_t max_num_pages =
         round_up_pages(BatchConfig::max_sequence_length() +
                        BatchConfig::max_spec_tree_token_num());
+    PageManager *pm = PageManager::get_page_manager();
+    size_t total_kv_cache_size_per_layer = pm->get_kv_cache_size_per_layer();
     switch (infer_mode) {
       case INC_DECODING_MODE:
-      case TREE_VERIFY_MODE:
+      case TREE_VERIFY_MODE: {
+        query_tmp_size = num_q_heads * qk_dim * max_tokens_per_batch;
+        // a K-ary tree max node is (k^n - 1) / 2
+        if (total_kv_cache_size_per_layer == 0) {
+          key_cache_size = num_kv_heads * qk_dim *
+                           BatchConfig::max_requests_per_batch() *
+                           max_num_pages * kPagesize;
+          value_cache_size = num_kv_heads * v_dim *
+                             BatchConfig::max_requests_per_batch() *
+                             max_num_pages * kPagesize;
+        } else {
+          key_cache_size = total_kv_cache_size_per_layer / 2 / size_of_dt;
+          value_cache_size = total_kv_cache_size_per_layer / 2 / size_of_dt;
+        }
+        break;
+      }
       case TREE_SEARCH_MODE: {
         query_tmp_size = num_q_heads * qk_dim * max_tokens_per_batch;
         // a K-ary tree max node is (k^n - 1) / 2
