@@ -1396,8 +1396,6 @@ BatchConfig RequestManager::prepare_ssm_prefilling_batch() {
   int num_tokens = 0;
   for (Request *request : prefilling_requests) {
     int request_index = request->batch_index;
-    // Only set the prefilling request to be available
-    bc.request_available[request_index] = true;
 
     // Request Info
     bc.requestsInfo[request_index].first_token_offset_in_batch = num_tokens;
@@ -1430,6 +1428,8 @@ BatchConfig RequestManager::prepare_ssm_prefilling_batch() {
     num_tokens += num_tokens_in_batch;
     if (num_tokens_in_batch > 0) {
       bc.num_available_requests++;
+      // Only set the prefilling request to be available
+      bc.request_available[request_index] = true;
     }
 
     // Record prefilling start time

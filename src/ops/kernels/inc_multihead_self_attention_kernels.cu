@@ -599,7 +599,7 @@ __global__ void update_qkv_in_batch_paged_kernel(
 }
 
 template <typename DT>
-void update_qkv_in_batch(IncMultiHeadSelfAttentionMeta const *m,
+void update_qkv_in_batch_paged(IncMultiHeadSelfAttentionMeta const *m,
                          BatchConfig const *bc,
                          cudaStream_t stream,
                          bool is_spec) {
@@ -1050,13 +1050,13 @@ template void Kernels::IncMultiHeadAttention::update_qkv_in_batch<half>(
     BatchConfig const *bc,
     cudaStream_t stream);
 
-template void Kernels::IncMultiHeadAttention::update_qkv_in_batch<float>(
+template void Kernels::IncMultiHeadAttention::update_qkv_in_batch_paged<float>(
     IncMultiHeadSelfAttentionMeta const *m,
     BatchConfig const *bc,
     cudaStream_t stream,
     bool is_spec);
 
-template void Kernels::IncMultiHeadAttention::update_qkv_in_batch<half>(
+template void Kernels::IncMultiHeadAttention::update_qkv_in_batch_paged<half>(
     IncMultiHeadSelfAttentionMeta const *m,
     BatchConfig const *bc,
     cudaStream_t stream,
