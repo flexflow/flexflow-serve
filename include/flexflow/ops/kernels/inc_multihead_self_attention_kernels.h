@@ -113,7 +113,7 @@ void update_qkv_in_batch(IncMultiHeadSelfAttentionMeta const *m,
                          cudaStream_t stream);
 
 template <typename DT>
-void update_qkv_in_batch(IncMultiHeadSelfAttentionMeta const *m,
+void update_qkv_in_batch_paged(IncMultiHeadSelfAttentionMeta const *m,
                          BatchConfig const *bc,
                          cudaStream_t stream,
                          bool is_spec);
