@@ -530,22 +530,20 @@ IncMultiHeadSelfAttentionMeta::IncMultiHeadSelfAttentionMeta(
         assert(false && "Unkown inference mode");
     }
     if (streaming_cache) {
-      size_t max_post_pos_enc_pages =
-          round_up_pages(BatchConfig::MAX_STREAMING_POS -
-                          BatchConfig::get_max_tree_depth() +
-                          max(max_tokens_per_batch,
-                              BatchConfig::max_spec_tree_token_num()));
+      size_t max_post_pos_enc_pages = round_up_pages(
+          BatchConfig::MAX_STREAMING_POS - BatchConfig::get_max_tree_depth() +
+          max(max_tokens_per_batch, BatchConfig::max_spec_tree_token_num()));
       key_cache_size = num_kv_heads * qk_dim *
-                        BatchConfig::max_requests_per_batch() *
-                        max_post_pos_enc_pages * kPagesize;
+                       BatchConfig::max_requests_per_batch() *
+                       max_post_pos_enc_pages * kPagesize;
       value_cache_size = num_kv_heads * v_dim *
-                          BatchConfig::max_requests_per_batch() *
-                          max_post_pos_enc_pages * kPagesize;
+                         BatchConfig::max_requests_per_batch() *
+                         max_post_pos_enc_pages * kPagesize;
       streaming_pre_pos_enc_size =
           num_kv_heads * (qk_dim + v_dim) *
           BatchConfig::max_requests_per_batch() *
           round_up_pages(BatchConfig::MAX_STREAMING_POS -
-                          BatchConfig::get_max_tree_depth()) *
+                         BatchConfig::get_max_tree_depth()) *
           kPagesize;
     }
     size_t attn_heads_size = max_tokens_per_batch * num_q_heads * v_dim;

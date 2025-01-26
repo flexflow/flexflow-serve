@@ -114,10 +114,15 @@ public:
     int first_token_index_in_request = -1;
     int first_token_offset_in_batch = -1;
     int num_tokens_in_batch = 0;
-    int padding = 0;      // Padding for memory pointer alignment
-    int num_kv_pages;     // number of kv pages used
-    int kv_last_page_len; // last page length of kv
     RequestGuid request_guid;
+
+    static constexpr size_t request_guid_size = sizeof(RequestGuid);
+    static constexpr size_t alignment = 16;
+    static constexpr size_t padding_size =
+        (alignment - (sizeof(int) * 3 + request_guid_size) % alignment) %
+        alignment;
+    static constexpr size_t padding_length = padding_size / sizeof(int);
+    int padding[padding_length] = {}; // Padding for memory pointer alignment
   };
 
   struct PerTokenInfo {

@@ -124,15 +124,14 @@ void commit_tokens(TreeIncMultiHeadSelfAttentionMeta const *m,
   commit_tokens_kernel<<<GET_BLOCKS(parallelism),
                          min(CUDA_NUM_THREADS, parallelism),
                          0,
-                         stream>>>(
-      static_cast<half *>(m->kvCache),
-      m->committed_token_infos,
-      m->request_available,
-      num_requests,
-      m->num_kv_heads,
-      m->qk_dim,
-      m->num_tokens_to_commit,
-      max_num_pages);
+                         stream>>>(static_cast<half *>(m->kvCache),
+                                   m->committed_token_infos,
+                                   m->request_available,
+                                   num_requests,
+                                   m->num_kv_heads,
+                                   m->qk_dim,
+                                   m->num_tokens_to_commit,
+                                   max_num_pages);
   //   cudaEventRecord(t_end, stream);
   //   checkCUDA(cudaEventSynchronize(t_end));
   //   float elapsed = 0;
