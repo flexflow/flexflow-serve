@@ -118,7 +118,9 @@ public:
 
     static constexpr size_t request_guid_size = sizeof(RequestGuid);
     static constexpr size_t alignment = 16;
-    static constexpr size_t padding_size = (alignment - (sizeof(int) * 3 + request_guid_size) % alignment) % alignment;
+    static constexpr size_t padding_size =
+        (alignment - (sizeof(int) * 3 + request_guid_size) % alignment) %
+        alignment;
     static constexpr size_t padding_length = padding_size / sizeof(int);
     int padding[padding_length] = {}; // Padding for memory pointer alignment
   };

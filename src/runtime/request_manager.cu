@@ -108,8 +108,8 @@ void prepare_inference_params_kernel_h(BatchConfig const *batch_config,
       indices_offset = indices_lens;
       indices_lens += (kv_len + kPagesize - 1) / kPagesize;
       q_indptr_h[indptr_idx + 1] = q_indptr_h[indptr_idx] + q_len;
-      kv_indptr_h[indptr_idx + 1] = round_up_pages(kv_len) +
-          kv_indptr_h[indptr_idx];
+      kv_indptr_h[indptr_idx + 1] =
+          round_up_pages(kv_len) + kv_indptr_h[indptr_idx];
       std::vector<int32_t> kv_indices = pm->get_block_table_indices(
           batch_config->requestsInfo[req_idx].request_guid);
       for (int i = indices_offset; i < indices_lens; i++) {
