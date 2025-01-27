@@ -76,12 +76,12 @@ for i in "${!traces[@]}"; do
     if [ "$trace" == "cortex" ]; then
         partitions=(
             QUESTION_SUGGESTION
-            # CATEGORIZATION
-            # FEATURE_EXTRACTION
-            # SQL_FANOUT1
-            # SQL_FANOUT2
-            # SQL_FANOUT3
-            # SQL_COMBINE
+            CATEGORIZATION
+            FEATURE_EXTRACTION
+            SQL_FANOUT1
+            SQL_FANOUT2
+            SQL_FANOUT3
+            SQL_COMBINE
         )
     else
         partitions=(all)

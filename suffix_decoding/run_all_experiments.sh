@@ -2,7 +2,8 @@
 set -x
 set -e
 
-# Usage: nohup ./run_all_experiments.sh &
+# Usage (from main repo dir): 
+#   nohup ./suffix_decoding/run_all_experiments.sh &
 
 # Cd into directory holding this script
 cd "${BASH_SOURCE[0]%/*}"
