@@ -19,7 +19,7 @@
 #include "flexflow/inference.h"
 #include "flexflow/model.h"
 #include "flexflow/utils/file_loader.h"
-#include "suffix_tree.h"
+#include "suffix_decoding.h"
 #include <condition_variable>
 #include <future>
 #include <mutex>
@@ -150,7 +150,7 @@ struct Request {
   std::vector<BatchConfig::TokenId> tokens;
 
   // TokenTree speculative_token_tree;
-  SuffixTree<int> *prompt_tree = nullptr;
+  SuffixTree *prompt_tree = nullptr;
   std::vector<int> suffix_decoding_best_token_ids;
   std::vector<int> suffix_decoding_best_parents;
   float suffix_decoding_best_score = 0.0f;
@@ -531,7 +531,7 @@ private:
   MatchingStrategy suffix_tree_matching_strategy;
   float suffix_tree_max_spec_factor = -1.0f;
   bool suffix_tree_online_tree_update = true;
-  SuffixTree<int> *suffix_tree = nullptr;
+  SuffixTree *suffix_tree = nullptr;
 
   // Background server handler
   Legion::Future background_server_handler;

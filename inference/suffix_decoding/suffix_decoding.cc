@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "suffix_tree.h"
+#include "suffix_decoding.h"
 #include "flexflow/inference.h"
 #include "flexflow/request_manager.h"
 #include "models/falcon.h"
