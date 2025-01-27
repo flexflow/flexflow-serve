@@ -333,23 +333,31 @@ void FlexFlow::top_level_task(Task const *task,
 
   std::ifstream input_file(file_paths.trace_file_path);
   assert(input_file.good() && "Prompt file does not exist.");
+  printf("Parsing trace file: %s into JSON\n", file_paths.trace_file_path.c_str());
   nlohmann::ordered_json j = nlohmann::ordered_json::parse(input_file);
+  printf("Trace file parsed successfully. Closing file.\n");
   input_file.close();
 
   // Find the partition with name "FEATURE_EXTRACTION"
+  printf("Getting handle to trace partitions\n");
   auto &partitions = j["partitions"];
+  printf("Finding the target partition\n");
   auto it =
       std::find_if(partitions.begin(),
                    partitions.end(),
                    [target_partition](nlohmann::ordered_json const &partition) {
                      return partition["partition_name"] == target_partition;
                    });
-  nlohmann::ordered_json &partition = *it;
+  printf("Found target partition (or reached end) of JSON\n");
   if (it == partitions.end()) {
     std::cerr << "Partition " << target_partition
               << " not found in the trace file." << std::endl;
     assert(false);
   }
+  printf("Getting direct handle to target partition\n");
+  nlohmann::ordered_json &partition = *it;
+  printf("Got direct handle to target partition\n");
+  
   // check that the max prompt + response length sum in the eval_entries in the
   // partition does not exceed the max_sequence_length
   int max_prompt_response_length = 0;
@@ -375,6 +383,7 @@ void FlexFlow::top_level_task(Task const *task,
               << max_sequence_length << ")." << std::endl;
     assert(false);
   }
+  printf("Checked if prompt + response length sum is within max_sequence_length\n");
 
   // Sanity check for SpecInfer old version
   // Total verified tokens
@@ -418,6 +427,7 @@ void FlexFlow::top_level_task(Task const *task,
   rm->set_suffix_tree_max_depth(max_tree_depth);
   rm->set_suffix_tree_max_spec_factor(max_spec_factor);
   rm->set_suffix_tree_online_tree_update(online_tree_update);
+  printf("Initializing suffix tree\n");
   rm->init_suffix_tree(file_paths.trace_file_path, target_partition);
 
   // Create LLM model

@@ -565,7 +565,13 @@ void RequestManager::init_suffix_tree(std::string const &trace_filepath,
     std::vector<int> encoded = this->tokenizer_->Encode(entry.response);
     training_dataset.push_back(encoded);
   }
+  std::cout << "Generating suffix tree for partition: " << partition_name
+            << "with " << training_dataset.size() << " training entries..." << std::endl;
+  auto start_time = std::chrono::high_resolution_clock::now();
   suffix_tree = new SuffixTree<int>(training_dataset);
+  auto end_time = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> duration = end_time - start_time;
+  std::cout << "Suffix tree construction took " << duration.count() << " seconds." << std::endl;
 }
 
 RequestManager::RequestGuid

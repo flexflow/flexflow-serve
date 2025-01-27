@@ -76,7 +76,8 @@ void parse_input_args(char **argv,
                       bool &do_sample,
                       double &request_per_second,
                       bool &add_special_tokens,
-                      std::string &target_partition) {
+                      std::string &target_partition,
+                      int &max_trace_requests) {
   for (int i = 1; i < argc; i++) {
     // llm model name
     if (!strcmp(argv[i], "-llm-model")) {
@@ -174,6 +175,11 @@ void parse_input_args(char **argv,
     }
     if (!strcmp(argv[i], "--add-special-tokens")) {
       add_special_tokens = true;
+      continue;
+    }
+    // this parameter can be used to set the maximum number of requests to run from the trace
+    if (!strcmp(argv[i], "--max-trace-requests")) {
+      max_trace_requests = std::stod(argv[++i]);
       continue;
     }
   }
@@ -358,6 +364,7 @@ void FlexFlow::top_level_task(Task const *task,
   double request_per_second = 1.0;
   bool add_special_tokens = false;
   std::string target_partition = "FEATURE_EXTRACTION";
+  int max_trace_requests = INT_MAX;
 
   InputArgs const &command_args = HighLevelRuntime::get_input_args();
   char **argv = command_args.argv;
@@ -379,7 +386,8 @@ void FlexFlow::top_level_task(Task const *task,
                    do_sample,
                    request_per_second,
                    add_special_tokens,
-                   target_partition);
+                   target_partition,
+                   max_trace_requests);
 
   get_model_meta(file_paths, model_metadata, use_full_precision);
 
@@ -391,23 +399,31 @@ void FlexFlow::top_level_task(Task const *task,
 
   std::ifstream input_file(file_paths.trace_file_path);
   assert(input_file.good() && "Prompt file does not exist.");
+  printf("Parsing trace file: %s into JSON\n", file_paths.trace_file_path.c_str());
   nlohmann::ordered_json j = nlohmann::ordered_json::parse(input_file);
+  printf("Trace file parsed successfully. Closing file.\n");
   input_file.close();
 
   // Find the partition with name "FEATURE_EXTRACTION"
+  printf("Getting handle to trace partitions\n");
   auto &partitions = j["partitions"];
+  printf("Finding the target partition\n");
   auto it =
       std::find_if(partitions.begin(),
                    partitions.end(),
                    [target_partition](nlohmann::ordered_json const &partition) {
                      return partition["partition_name"] == target_partition;
                    });
-  nlohmann::ordered_json &partition = *it;
+  printf("Found target partition (or reached end) of JSON\n");
   if (it == partitions.end()) {
     std::cerr << "Partition " << target_partition
               << " not found in the trace file." << std::endl;
     assert(false);
   }
+  printf("Getting direct handle to target partition\n");
+  nlohmann::ordered_json &partition = *it;
+  printf("Got direct handle to target partition\n");
+  
   // check that the max prompt + response length sum in the eval_entries in the
   // partition does not exceed the max_sequence_length
   int max_prompt_response_length = 0;
@@ -433,6 +449,7 @@ void FlexFlow::top_level_task(Task const *task,
               << max_sequence_length << ")." << std::endl;
     assert(false);
   }
+  printf("Checked if prompt + response length sum is within max_sequence_length\n");
 
   // Sanity check for SpecInfer old version
   assert(max_tree_depth <= 8);
@@ -577,7 +594,10 @@ void FlexFlow::top_level_task(Task const *task,
       timestamps.push_back(0);
       ratios.push_back(1.0);
       total_num_requests++;
-
+      
+      if (total_num_requests >= max_trace_requests) {
+        break;
+      }
       if (verbose) {
         break;
       }
@@ -587,7 +607,7 @@ void FlexFlow::top_level_task(Task const *task,
         tree_model.generate(requests, emission_machine);
     assert(result.size() == requests.size());
     assert(result.size() == total_num_requests);
-    assert(result.size() == partition["eval_entries"].size());
+    assert(result.size() == std::min((int)partition["eval_entries"].size(), max_trace_requests));
     int i = 0;
     for (auto &entry : partition["eval_entries"]) {
       entry["original_response"] = entry["response"];
@@ -598,6 +618,9 @@ void FlexFlow::top_level_task(Task const *task,
       entry["response_length"] = result[i].output_tokens.size();
       entry["specinfer_decoding_steps"] = result[i].decoding_steps;
       i++;
+      if (i >= total_num_requests) {
+        break;
+      }
     }
 
     // Write the modified JSON to a file
