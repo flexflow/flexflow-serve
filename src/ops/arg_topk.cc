@@ -287,12 +287,11 @@ void ArgTopK::forward(FFModel const &ff) {
   assert(false);
 }
 
-FutureMap ArgTopK::inference(
-    FFModel const &ff,
-    /* Reserved: BatchConfig Updated */ BatchConfigFuture const &bc,
-    std::vector<ParallelTensor> const &batch_inputs,
-    std::vector<ParallelTensor> const &batch_outputs,
-    MachineView const *mv) {
+FutureMap ArgTopK::inference(FFModel const &ff,
+                             BatchConfigFuture const &bc,
+                             std::vector<ParallelTensor> const &batch_inputs,
+                             std::vector<ParallelTensor> const &batch_outputs,
+                             MachineView const *mv) {
   ArgumentMap argmap;
   Context ctx = ff.config.lg_ctx;
   Runtime *runtime = ff.config.lg_hlr;

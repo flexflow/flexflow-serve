@@ -371,17 +371,16 @@ __global__ void arg_topk_forward_kernel(T const *__restrict__ input,
 
 /*static*/
 template <typename DT>
-void ArgTopK::forward_kernel(
-    ArgTopKMeta const *m,
-    DT const *input_ptr,
-    float *output_ptr,
-    int *indices_ptr,
-    size_t batch_size,
-    int length,
-    int k,
-    bool sorted,
-    /* Reserved: BatchConfig Updated */ BatchConfig const *bc,
-    hipStream_t stream) {
+void ArgTopK::forward_kernel(ArgTopKMeta const *m,
+                             DT const *input_ptr,
+                             float *output_ptr,
+                             int *indices_ptr,
+                             size_t batch_size,
+                             int length,
+                             int k,
+                             bool sorted,
+                             BatchConfig const *bc,
+                             hipStream_t stream) {
   // Adopted from TensorFlow's ArgTopK implementation
   // https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/kernels/topk_op_gpu.h
   int num_shards = 0;
