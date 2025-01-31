@@ -83,18 +83,17 @@ __global__ void renormalize_kernel(DT *topk_values,
 
 /*static*/
 template <typename DT>
-void ArgTopK::forward_kernel(
-    ArgTopKMeta *m,
-    DT const *input_ptr,
-    DT *output_ptr,
-    int *indices_ptr,
-    size_t batch_size,
-    int length,
-    int k,
-    bool sorted,
-    bool renormalize,
-    /* Reserved: BatchConfig Updated */ BatchConfig const *bc,
-    cudaStream_t stream) {
+void ArgTopK::forward_kernel(ArgTopKMeta *m,
+                             DT const *input_ptr,
+                             DT *output_ptr,
+                             int *indices_ptr,
+                             size_t batch_size,
+                             int length,
+                             int k,
+                             bool sorted,
+                             bool renormalize,
+                             BatchConfig const *bc,
+                             cudaStream_t stream) {
   assert(bc->num_active_requests() >= 0);
   if (m->device_resources.find(stream) == m->device_resources.end()) {
     m->device_resources[stream] = new raft::device_resources(stream);

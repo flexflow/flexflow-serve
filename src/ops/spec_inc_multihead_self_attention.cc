@@ -710,7 +710,7 @@ void SpecIncMultiHeadSelfAttention::forward(FFModel const &ff) {
 
 FutureMap SpecIncMultiHeadSelfAttention::inference(
     FFModel const &ff,
-    /* Reserved: BatchConfig Updated */ BatchConfigFuture const &bc,
+    BatchConfigFuture const &bc,
     std::vector<ParallelTensor> const &batch_inputs,
     std::vector<ParallelTensor> const &batch_outputs,
     MachineView const *mv) {

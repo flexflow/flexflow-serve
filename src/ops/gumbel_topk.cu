@@ -430,18 +430,17 @@ __global__ void
 
 /*static*/
 template <typename DT>
-void GumbelTopK::forward_kernel(
-    GumbelTopKMeta const *m,
-    DT const *input_ptr,
-    float *log_probs_ptr,
-    float *perturbed_log_probs_ptr,
-    int *indices_ptr,
-    size_t batch_size,
-    int length,
-    int k,
-    bool sorted,
-    /* Reserved: BatchConfig Updated */ BatchConfig const *bc,
-    cudaStream_t stream) {
+void GumbelTopK::forward_kernel(GumbelTopKMeta const *m,
+                                DT const *input_ptr,
+                                float *log_probs_ptr,
+                                float *perturbed_log_probs_ptr,
+                                int *indices_ptr,
+                                size_t batch_size,
+                                int length,
+                                int k,
+                                bool sorted,
+                                BatchConfig const *bc,
+                                cudaStream_t stream) {
   // Adopted from TensorFlow's ArgTopK implementation
   // https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/kernels/topk_op_gpu.h
   int num_shards = 0;
