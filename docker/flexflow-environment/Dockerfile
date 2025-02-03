@@ -130,5 +130,31 @@ RUN pip3 install streamlit
 # Install Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH /root/.cargo/bin:$PATH
+# RUN ln -s /opt/conda /opt/saturncloud
+# RUN sudo apt update -y && sudo apt install -y openssh-server openssh-client
+# # Make a user called jovyan with uid=1000 and their home directory created
+# RUN useradd -m -u 1000 -s /bin/bash jovyan
+# # Enable passwordless sudo for all users
+# RUN echo "ALL ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+# RUN sudo useradd --uid 1000 --create-home --home-dir /home/jovyan --shell /bin/bash jovyan
+# RUN sudo passwd -d jovyan
+
+# Install sshd
+RUN apt-get update && apt-get install -y openssh-server
+
+# Symlink conda folder to /opt/saturncloud
+RUN ln -s /opt/conda /opt/saturncloud
+
+# Create the jovyan user with UID 1000
+RUN useradd -m -u 1000 -s /bin/bash jovyan
+# Add jovyan to the sudo group
+RUN usermod -aG sudo jovyan
+# Configure passwordless sudo for jovyan
+RUN echo "jovyan ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jovyan && \
+    chmod 440 /etc/sudoers.d/jovyan
+# Set user to jovyan for subsequent commands (optional)
+USER jovyan
+# Set working directory (optional)
+WORKDIR /home/jovyan
 
 ENTRYPOINT ["/bin/bash"]
