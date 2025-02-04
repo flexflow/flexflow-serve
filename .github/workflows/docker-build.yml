@@ -1,14 +1,9 @@
 name: "docker-build"
 on:
   pull_request:
-    paths:
-      - "docker/**"
-      - "!docker/README.md"
-      - ".github/workflows/docker-build.yml"
   push:
     branches:
       - "inference"
-      - "master"
   schedule:
     # At 00:00 on day-of-month 1, 14, and 28.
     - cron: "0 0 1,14,28 * *" 

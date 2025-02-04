@@ -1,29 +1,9 @@
 name: "build"
 on:
   pull_request:
-    paths:
-      - "include/**"
-      - "inference/**"
-      - "cmake/**"
-      - "config/**"
-      - "deps/**"
-      - "python/**"
-      - "src/**"
-      - ".github/workflows/helpers/install_dependencies.sh"
-      - ".github/workflows/build.yml"
   push:
     branches:
-      - "master"
-    paths:
-      - "include/**"
-      - "inference/**"
-      - "cmake/**"
-      - "config/**"
-      - "deps/**"
-      - "python/**"
-      - "src/**"
-      - ".github/workflows/helpers/install_dependencies.sh"
-      - ".github/workflows/build.yml"
+      - "inference"
   workflow_dispatch:
 concurrency:
   group: build-${{ github.head_ref || github.run_id }}
@@ -31,7 +11,7 @@ concurrency:
 
 jobs:
   cmake-build:
-    name: Build FlexFlow Serve with CMake
+    name: Build FlexFlow Serve
     runs-on: ubuntu-20.04
     defaults:
       run:
@@ -71,15 +51,17 @@ jobs:
           environment-file: conda/flexflow.yml
           auto-activate-base: false
 
-      - name: Build FlexFlow Serve
+      - name: Build and Install FlexFlow Serve
         run: |
+          if [[ -z "${CUDA_PATH}" ]]; then
+            echo "CUDA_PATH is not set. Please check the installation of the CUDA toolkit."
+            exit 1
+          fi
           export CUDNN_DIR="$CUDA_PATH"
           export CUDA_DIR="$CUDA_PATH"
-          export FF_HOME=$(pwd)
-          export FF_CUDA_ARCH=70
+          export FF_CUDA_ARCH=80
           export FF_HIP_ARCH=gfx1100,gfx1036
           export hip_version=5.6
-          export FF_BUILD_INFERENCE=ON
 
           cores_available=$(nproc --all)
           n_build_cores=$(( cores_available -1 ))
@@ -88,27 +70,14 @@ jobs:
           cd build
           
           ../config/config.linux
-          make -j $n_build_cores
-
-      - name: Install FlexFlow Serve
-        run: |
-          export CUDNN_DIR="$CUDA_PATH"
-          export CUDA_DIR="$CUDA_PATH"
-          export FF_HOME=$(pwd)
-          export FF_CUDA_ARCH=70
-          export FF_HIP_ARCH=gfx1100,gfx1036
-          export hip_version=5.6
-          export FF_BUILD_INFERENCE=ON
-
-          cd build
-          ../config/config.linux
-          sudo make install
+          sudo make -j $n_build_cores install
           sudo ldconfig
 
       - name: Check availability of flexflow modules in Python
         run: |
           if [[ "${FF_GPU_BACKEND}" == "cuda" ]]; then
             export LD_LIBRARY_PATH="$CUDA_PATH/lib64/stubs:$LD_LIBRARY_PATH"
+            sudo ln -s $CUDA_PATH/lib64/stubs/libcuda.so $CUDA_PATH/lib64/stubs/libcuda.so.1
           fi
           # Remove build folder to check that the installed version can run independently of the build files
           rm -rf build
