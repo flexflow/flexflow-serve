@@ -2677,7 +2677,6 @@ void flexflow_perform_registration(void) {
                                          true /*global*/);
 }
 
-
 // -----------------------------------------------------------------------
 // BatchConfig
 // -----------------------------------------------------------------------
@@ -3167,4 +3166,3 @@ void flexflow_peft_model_id_destroy(flexflow_peft_model_id_t handle_) {
   DEBUG_PRINT("[PEFTModelID] delete %p", peft_model_id);
   delete peft_model_id;
 }
-
