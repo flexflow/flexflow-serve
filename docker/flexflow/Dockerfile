@@ -7,8 +7,7 @@ LABEL org.opencontainers.image.description="flexflow-serve container"
 
 # Copy flexflow-serve repository
 RUN mkdir flexflow-serve
-ENV FF_HOME=/usr/flexflow-serve
-WORKDIR ${FF_HOME}
+WORKDIR /usr/flexflow-serve
 COPY . .
 
 # Args to build flexflow-serve

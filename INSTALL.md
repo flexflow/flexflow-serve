@@ -77,11 +77,6 @@ make -j N
 ## 6. Test FlexFlow
 After building FlexFlow, you can test it to ensure that the build completed without issue, and that your system is ready to run FlexFlow.
 
-### Set the `FF_HOME` environment variable before running FlexFlow. To make it permanent, you can add the following line in ~/.bashrc.
-```
-export FF_HOME=/path/to/FlexFlow
-```
-
 ### Run FlexFlow Python examples
 The Python examples are in the [examples/python](https://github.com/flexflow/FlexFlow/tree/master/examples/python). The native, Keras integration and PyTorch integration examples are listed in `native`, `keras` and `pytorch` respectively.
 
@@ -94,7 +89,6 @@ source ./build/set_python_envs.sh
 **We recommend that you run the** `mnist_mlp` **test under** `native` **using the following cmd to check if FlexFlow has been installed correctly:**
 
 ```
-cd "$FF_HOME"
 ./python/flexflow_python examples/python/native/mnist_mlp.py -ll:py 1 -ll:gpu 1 -ll:fsize <size of gpu buffer> -ll:zsize <size of zero buffer>
 ```
 A script to run all the Python examples is available at `tests/training_tests.sh`

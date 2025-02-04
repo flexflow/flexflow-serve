@@ -16,9 +16,7 @@
 #include "flexflow/flexflow_c.h"
 #include "flexflow/dataloader.h"
 #include "flexflow/mapper.h"
-#ifdef FF_BUILD_INFERENCE
 #include "flexflow/request_manager.h"
-#endif
 #include "flexflow/utils/file_loader.h"
 
 using namespace Legion;
@@ -60,7 +58,6 @@ public:
   FF_NEW_OPAQUE_WRAPPER(flexflow_dlrm_config_t, DLRMConfig *);
   FF_NEW_OPAQUE_WRAPPER(flexflow_single_dataloader_t, SingleDataLoader *);
   // inference
-#ifdef FF_BUILD_INFERENCE
   FF_NEW_OPAQUE_WRAPPER(flexflow_batch_config_t, BatchConfig *);
   FF_NEW_OPAQUE_WRAPPER(flexflow_tree_verify_batch_config_t,
                         TreeVerifyBatchConfig *);
@@ -77,7 +74,6 @@ public:
   //                       LoraAdamOptimizerConfig *);
   FF_NEW_OPAQUE_WRAPPER(flexflow_lora_linear_config_t, LoraLinearConfig *);
   FF_NEW_OPAQUE_WRAPPER(flexflow_peft_model_id_t, PEFTModelID *);
-#endif
 };
 
 Logger ffc_log("flexflow_c");
@@ -1612,7 +1608,6 @@ flexflow_tensor_t flexflow_model_add_argmax(flexflow_model_t handle_,
   return FFCObjectWrapper::wrap(tensor);
 }
 
-#ifdef FF_BUILD_INFERENCE
 void flexflow_model_add_lora_layers(flexflow_model_t handle_,
                                     int num_target_modules,
                                     char const **target_modules_) {
@@ -1642,7 +1637,6 @@ flexflow_peft_model_id_t flexflow_model_register_peft_adapter(
       peft_model_id);
   return FFCObjectWrapper::wrap(peft_model_id);
 }
-#endif
 
 void flexflow_model_set_sgd_optimizer(flexflow_model_t handle_,
                                       flexflow_sgd_optimizer_t optimizer_) {
@@ -1697,7 +1691,6 @@ void flexflow_model_set_transformer_layer_id(flexflow_model_t handle_, int id) {
   handle->set_transformer_layer_id(id);
 }
 
-#ifdef FF_BUILD_INFERENCE
 void flexflow_model_generate(flexflow_model_t handle_,
                              int num_requests,
                              enum RequestType *request_types,
@@ -1797,7 +1790,6 @@ void flexflow_model_generate(flexflow_model_t handle_,
     }
   }
 }
-#endif
 
 void flexflow_model_set_position_offset(flexflow_model_t handle_,
                                         int const offset) {
@@ -2685,7 +2677,6 @@ void flexflow_perform_registration(void) {
                                          true /*global*/);
 }
 
-#ifdef FF_BUILD_INFERENCE
 
 // -----------------------------------------------------------------------
 // BatchConfig
@@ -3177,4 +3168,3 @@ void flexflow_peft_model_id_destroy(flexflow_peft_model_id_t handle_) {
   delete peft_model_id;
 }
 
-#endif
