@@ -1,8 +1,8 @@
 
 
+#include "flexflow/utils/peft_weight_allocator.h"
 #include "flexflow/ops/kernels/decompress_kernels.h"
 #include "flexflow/utils/hip_helper.h"
-#include "flexflow/utils/peft_weight_allocator.h"
 #include <random>
 #include <vector>
 namespace FlexFlow {
@@ -35,10 +35,10 @@ void lora_init_kernel(LoraLinearWeight const &weight,
     }
   }
   checkCUDA(hipMemcpyAsync(static_cast<DT *>(weight.w0_ptr),
-                            lora_a_random_init.data(),
-                            w0_num_elements * sizeof(DT),
-                            hipMemcpyHostToDevice,
-                            stream));
+                           lora_a_random_init.data(),
+                           w0_num_elements * sizeof(DT),
+                           hipMemcpyHostToDevice,
+                           stream));
 
   // LoRA_B weight: [rank, out_dim]
   float stdv_lora_b = 1.0f / sqrt(rank);
@@ -53,10 +53,10 @@ void lora_init_kernel(LoraLinearWeight const &weight,
     }
   }
   checkCUDA(hipMemcpyAsync(static_cast<DT *>(weight.w1_ptr),
-                            lora_b_random_init.data(),
-                            w1_num_elements * sizeof(DT),
-                            hipMemcpyHostToDevice,
-                            stream));
+                           lora_b_random_init.data(),
+                           w1_num_elements * sizeof(DT),
+                           hipMemcpyHostToDevice,
+                           stream));
 }
 
 void init_peft_weight_wrapper(LoraLinearWeight const &weight,
