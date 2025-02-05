@@ -395,6 +395,7 @@ class LLM:
             weights_path = self.__get_resource_path(
                 hf_peft_model_id.lower(), CachedResourceType.WEIGHTS
             )
+            adapter_path = os.path.join(adapter_path, "adapter_model.safetensors")
             with safe_open(adapter_path, framework="pt", device="cpu") as f:
                 for tensor_name in f.keys():
                     tensor = f.get_tensor(tensor_name)
