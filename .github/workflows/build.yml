@@ -53,10 +53,6 @@ jobs:
 
       - name: Build and Install FlexFlow Serve
         run: |
-          if [[ -z "${CUDA_PATH}" ]]; then
-            echo "CUDA_PATH is not set. Please check the installation of the CUDA toolkit."
-            exit 1
-          fi
           export CUDNN_DIR="$CUDA_PATH"
           export CUDA_DIR="$CUDA_PATH"
           export FF_CUDA_ARCH=80
