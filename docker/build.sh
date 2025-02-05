@@ -1,11 +1,10 @@
 #! /usr/bin/env bash
 set -euo pipefail
-set -x
 
 # Usage: ./build.sh <docker_image_name>
 # Optional environment variables: FF_GPU_BACKEND, cuda_version, hip_version
 
-# Cd into $FF_HOME. Assumes this script is in $FF_HOME/docker
+# Cd into flexflow-serve. Assumes this script is in flexflow-serve/docker
 cd "${BASH_SOURCE[0]%/*}/.."
 
 # Parse input params

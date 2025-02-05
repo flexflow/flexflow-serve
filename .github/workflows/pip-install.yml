@@ -2,26 +2,9 @@ name: "pip-install"
 on:
   pull_request:
     paths:
-      - "cmake/**"
-      - "config/**"
-      - "deps/**"
-      - "python/**"
-      - "setup.py"
-      - "requirements.txt"
-      - ".github/workflows/helpers/install_dependencies.sh"
-      - ".github/workflows/pip-install.yml"
   push:
     branches:
-      - "master"
-    paths:
-      - "cmake/**"
-      - "config/**"
-      - "deps/**"
-      - "python/**"
-      - "setup.py"
-      - "requirements.txt"
-      - ".github/workflows/helpers/install_dependencies.sh"
-      - ".github/workflows/pip-install.yml"
+      - "inference"
   workflow_dispatch:
 concurrency:
   group: pip-install-${{ github.head_ref || github.run_id }}
@@ -58,13 +41,12 @@ jobs:
         uses: conda-incubator/setup-miniconda@v2
         with:
           activate-environment: flexflow
-          environment-file: conda/environment.yml
+          environment-file: conda/flexflow.yml
           auto-activate-base: false
 
       - name: Build and Install FlexFlow
         run: |
-          export FF_HOME=$(pwd)
-          export FF_CUDA_ARCH=70
+          export FF_CUDA_ARCH=80
           pip install . --verbose
           # Remove build folder to check that the installed version can run independently of the build files
           rm -rf build
