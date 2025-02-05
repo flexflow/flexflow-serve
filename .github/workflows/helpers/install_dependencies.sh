@@ -66,3 +66,6 @@ else
     echo "FF_GPU_BACKEND: ${FF_GPU_BACKEND}. Skipping installing HIP dependencies"
 fi
 sudo rm -rf /var/lib/apt/lists/*
+# Install Rust
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+. "$HOME/.cargo/env"
