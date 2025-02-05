@@ -464,6 +464,26 @@ void peft_bwd_kernel(Context ctx,
                               compute_type,
                               HIPBLAS_GEMM_DEFAULT));
     }
+    checkCUDA(hipblasGemmEx(m->handle.blas,
+                            CUBLAS_OP_N,
+                            CUBLAS_OP_T,
+                            lora_config.rank,
+                            out_dim,
+                            num_peft_tokens,
+                            &scaling_constant,
+                            weight.low_rank_activation,
+                            lr_actv_type,
+                            lora_config.rank,
+                            output_grad_ptr,
+                            output_type,
+                            out_dim,
+                            &beta,
+                            weight.w1_grad_ptr,
+                            weight_type,
+                            lora_config.rank,
+                            compute_type,
+                            HIPBLAS_GEMM_DEFAULT));
+  }
 
     if (bc->requestsInfo[i].optimizer_tasks.update_weights) {
       assert(lora_config.optimizer_config != nullptr);

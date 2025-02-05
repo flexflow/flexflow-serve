@@ -530,6 +530,7 @@ OpMeta *IncMultiHeadSelfAttention::init_task(
   }
   m->profiling = attn->profiling;
   m->inference_debugging = attn->inference_debugging;
+  m->enable_peft_finetuning = attn->enable_peft_finetuning;
   std::strcpy(m->op_name, attn->name);
   m->layer_guid = attn->layer_guid;
 
@@ -678,7 +679,7 @@ FutureMap IncMultiHeadSelfAttention::peft_bwd(
   regions[0](I): input
   regions[1](O): output
 */
-void IncMultiHeadSelfAttention::peft_bwd_task(
+bool IncMultiHeadSelfAttention::peft_bwd_task(
     Task const *task,
     std::vector<PhysicalRegion> const &regions,
     Context ctx,
@@ -689,12 +690,13 @@ void IncMultiHeadSelfAttention::peft_bwd_task(
   log_inc_mha.debug("BatchConfig, num_tokens: %d, num_requests: %d",
                     bc->num_tokens,
                     bc->num_active_requests());
-  if (bc->num_active_peft_tokens() == 0) {
-    return;
-  }
 
   IncMultiHeadSelfAttentionMeta *m =
       *((IncMultiHeadSelfAttentionMeta **)task->local_args);
+
+  if (!bc->peft_bwd_applies_to_this_layer(m->layer_guid.transformer_layer_id)) {
+    return false;
+  }
 
   assert(regions.size() == 2); // input grad, output grad
 
@@ -722,6 +724,7 @@ void IncMultiHeadSelfAttention::peft_bwd_task(
     IncMultiHeadSelfAttention::save_inference_tensors_to_file(
         m, shard_id, bc, {input_grad}, {}, {output_grad}, false);
   }
+  return true;
 }
 
 void IncMultiHeadSelfAttention::backward(FFModel const &ff) {

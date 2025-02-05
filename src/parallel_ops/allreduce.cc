@@ -131,7 +131,7 @@ void AllReduce::init(FFModel const &ff) {
                          false /*must*/,
                          0 /*mapper_id*/,
                          outputs[0]->machine_view.hash());
-  launcher.concurrent = true;
+  // launcher.concurrent = true;
   launcher.add_region_requirement(RegionRequirement(inputs[0]->part,
                                                     0 /*projection id*/,
                                                     READ_ONLY,
@@ -270,7 +270,7 @@ void AllReduce::init_inference(FFModel const &ff,
                          false /*must*/,
                          0 /*mapper_id*/,
                          machine_view_hash);
-  launcher.concurrent = true;
+  // launcher.concurrent = true;
   launcher.add_region_requirement(RegionRequirement(batch_inputs[0]->part,
                                                     0 /*projection id*/,
                                                     READ_ONLY,
@@ -403,7 +403,7 @@ FutureMap AllReduce::peft_bwd(FFModel const &ff,
 }
 
 /*static*/
-void AllReduce::peft_bwd_task(Task const *task,
+bool AllReduce::peft_bwd_task(Task const *task,
                               std::vector<PhysicalRegion> const &regions,
                               Context ctx,
                               Runtime *runtime) {
@@ -412,8 +412,8 @@ void AllReduce::peft_bwd_task(Task const *task,
 
   AllReduceMeta *m = *((AllReduceMeta **)task->local_args);
   BatchConfig const *bc = BatchConfig::from_future(task->futures[0]);
-  if (bc->num_active_peft_tokens() == 0) {
-    return;
+  if (!bc->peft_bwd_applies_to_this_layer(m->layer_guid.transformer_layer_id)) {
+    return false;
   }
   GenericTensorAccessorW input_grad = helperGetGenericTensorAccessorRW(
       m->input_type[0], regions[0], task->regions[0], FID_DATA, ctx, runtime);
@@ -428,6 +428,7 @@ void AllReduce::peft_bwd_task(Task const *task,
     AllReduce::save_inference_tensors_to_file(
         m, shard_id, bc, {input_grad}, {}, {output_grad}, false);
   }
+  return true;
 }
 
 bool AllReduce::measure_operator_cost(Simulator *sim,

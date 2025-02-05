@@ -703,16 +703,16 @@ Legion::FutureMap
   regions[1](I/O): input_grad
   regions[2](I): gamma
 */
-void LayerNorm::peft_bwd_task(Task const *task,
+bool LayerNorm::peft_bwd_task(Task const *task,
                               std::vector<PhysicalRegion> const &regions,
                               Context ctx,
                               Runtime *runtime) {
   BatchConfig const *bc = BatchConfig::from_future(task->futures[0]);
-  if (bc->num_active_peft_tokens() == 0) {
-    return;
-  }
   LayerNormMeta const *m = *((LayerNormMeta **)task->local_args);
   assert(task->regions.size() == regions.size());
+  if (!bc->peft_bwd_applies_to_this_layer(m->layer_guid.transformer_layer_id)) {
+    return false;
+  }
 
   GenericTensorAccessorR output_grad = helperGetGenericTensorAccessorRO(
       m->output_type[0], regions[0], task->regions[0], FID_DATA, ctx, runtime);
@@ -742,6 +742,7 @@ void LayerNorm::peft_bwd_task(Task const *task,
     assert(regions.size() == 2);
   }
   LayerNorm::peft_bwd_kernel_wrapper(m, output_grad, input_grad, gamma);
+  return true;
 }
 
 void LayerNorm::backward(FFModel const &ff) {

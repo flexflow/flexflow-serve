@@ -1,6 +1,6 @@
 [submodule "deps/legion"]
 	path = deps/legion
-	url = https://gitlab.com/StanfordLegion/legion.git
+	url = https://gitlab.com/goliaro/legion.git
 [submodule "deps/nccl"]
 	path = deps/nccl
 	url = https://github.com/NVIDIA/nccl.git
@@ -23,3 +23,6 @@
 	path = deps/tokenizers-cpp
 	url = https://github.com/mlc-ai/tokenizers-cpp.git
 	fetchRecurseSubmodules = true
+[submodule "deps/flashinfer"]
+	path = deps/flashinfer
+	url = https://github.com/flashinfer-ai/flashinfer.git

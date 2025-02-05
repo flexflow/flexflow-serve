@@ -71,7 +71,7 @@ public:
                              std::vector<Legion::PhysicalRegion> const &regions,
                              Legion::Context ctx,
                              Legion::Runtime *runtime);
-  static void peft_bwd_task(Legion::Task const *task,
+  static bool peft_bwd_task(Legion::Task const *task,
                             std::vector<Legion::PhysicalRegion> const &regions,
                             Legion::Context ctx,
                             Legion::Runtime *runtime);
@@ -105,7 +105,6 @@ public:
 private:
   Linear(int guid,
          bool profiling,
-         bool inference_debugging,
          const ParallelTensor input,
          int out_dim,
          ActiMode activation,

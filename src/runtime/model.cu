@@ -91,11 +91,30 @@ FFHandler
   handle.offload_reserve_space_size = info->offload_reserve_space_size;
   handle.quantization_type = info->quantization_type;
   handle.allowTensorOpMathConversion = info->allowTensorOpMathConversion;
+  handle.incr_attention_metadata = new AttentionMetaData();
+  handle.tree_search_attention_metadata = new AttentionMetaData();
+  handle.tree_verify_attention_metadata = new AttentionMetaData();
+  assert(handle.incr_attention_metadata != nullptr &&
+         "Attention metadata must be allocated");
+  assert(handle.tree_search_attention_metadata != nullptr &&
+         "Attention metadata must be allocated");
+  assert(handle.tree_verify_attention_metadata != nullptr &&
+         "Attention metadata must be allocated");
   checkCUDA(cublasCreate(&handle.blas));
+  // checkCUDA(cublasLtCreate(&handle.blasLt));
   if (handle.allowTensorOpMathConversion) {
     checkCUDA(cublasSetMathMode(handle.blas, CUBLAS_TENSOR_OP_MATH));
   }
   checkCUDNN(cudnnCreate(&handle.dnn));
+  // handle.num_devices = 0;
+  // handle.device_id = 0;
+  // handle.gemm_engine = new Internal::GemmEngine(handle.blas, handle.blasLt);
+  // // We may not use all devices, physical_device may not be successive, so we
+  // // explicitly get the physical device id
+  // int physical_device;
+  // checkCUDA(cudaGetDevice(&physical_device));
+  // checkCUDA(cudaGetDeviceProperties(handle.gemm_engine->device_prop,
+  //                                   physical_device));
   // #ifdef FF_USE_NCCL
   //   checkNCCL(ncclCommInitRank(&handle.nccl, info->allRanks, info->ncclId,
   //   info->myRank)); fprintf(stderr, "handle.nccl(%p)\n", handle.nccl);
@@ -147,12 +166,28 @@ FFHandler
   } else {
     handle.offload_reserve_space = nullptr;
   }
-  if (handle.batch_config_metadata_size > 0) {
+  // std::cout << "handle.batch_config_metadata_size: "
+  //           << handle.batch_config_metadata_size << std::endl;
+  // std::cout << "handle.incr_attention_metadata->mem_size(): "
+  //           << handle.incr_attention_metadata->mem_size() << std::endl;
+  // std::cout << "handle.tree_search_attention_metadata->mem_size(): "
+  //           << handle.tree_search_attention_metadata->mem_size() << std::endl;
+  // std::cout << "handle.tree_verify_attention_metadata->mem_size(): "
+  //           << handle.tree_verify_attention_metadata->mem_size() << std::endl;
+  // std::cout << "handle.gemm_engine->workspace_size: "
+  //           << handle.gemm_engine->workspace_size << std::endl;
+  if (handle.batch_config_metadata_size +
+      handle.incr_attention_metadata->mem_size() +
+      handle.tree_search_attention_metadata->mem_size() +
+      handle.tree_verify_attention_metadata->mem_size()) {
     // allocate memory for offload reserve space
     Memory gpu_mem = get_proc_mem(Machine::get_machine(), task->target_proc);
     Realm::Rect<1, coord_t> bounds(
         Realm::Point<1, coord_t>(0),
-        Realm::Point<1, coord_t>(handle.batch_config_metadata_size - 1));
+        Realm::Point<1, coord_t>(handle.batch_config_metadata_size +
+            handle.incr_attention_metadata->mem_size() +
+            handle.tree_search_attention_metadata->mem_size() +
+            handle.tree_verify_attention_metadata->mem_size() - 1));
     std::vector<size_t> field_sizes;
     field_sizes.push_back(sizeof(char));
     Realm::RegionInstance workspaceInst;
@@ -163,28 +198,34 @@ FFHandler
                                            0,
                                            Realm::ProfilingRequestSet())
         .wait();
-    handle.batch_config_metadata = static_cast<CombinedBatchConfigMetaStruct *>(
-        workspaceInst.pointer_untyped(0, sizeof(char)));
+    void *ptr = workspaceInst.pointer_untyped(0, sizeof(char));
+    handle.batch_config_metadata = static_cast<CombinedBatchConfigMetaStruct *>(ptr);
+    handle.incr_attention_metadata->assign_address(
+        static_cast<void *>(static_cast<char *>(ptr) + handle.batch_config_metadata_size),
+        handle.incr_attention_metadata->mem_size());
+    handle.tree_search_attention_metadata->assign_address(
+        static_cast<void *>(static_cast<char *>(ptr) + handle.batch_config_metadata_size + handle.incr_attention_metadata->mem_size()),
+        handle.tree_search_attention_metadata->mem_size());
+    handle.tree_verify_attention_metadata->assign_address(
+        static_cast<void *>(static_cast<char *>(ptr) +
+                            handle.batch_config_metadata_size +
+                            handle.incr_attention_metadata->mem_size() +
+                            handle.tree_search_attention_metadata->mem_size()),
+        handle.tree_verify_attention_metadata->mem_size());
+    // handle.gemm_engine->assign_workspace(
+    //     static_cast<void *>(static_cast<char *>(ptr) +
+    //                         handle.batch_config_metadata_size +
+    //                         handle.incr_attention_metadata->mem_size() +
+    //                         handle.tree_search_attention_metadata->mem_size() +
+    //                         handle.tree_verify_attention_metadata->mem_size()),
+    //     handle.gemm_engine->workspace_size);
   } else {
     handle.batch_config_metadata = nullptr;
+    handle.incr_attention_metadata->assign_address(nullptr, 0);
+    handle.tree_search_attention_metadata->assign_address(nullptr, 0);
+    handle.tree_verify_attention_metadata->assign_address(nullptr, 0);
+    // handle.gemm_engine->assign_workspace(nullptr, 0);
   }
-  // #ifdef DEADCODE
-  if (info->peft_activation_reserve_space_size > 0) {
-    // allocate memory for peft activation reserve space
-    Memory gpu_mem = Machine::MemoryQuery(Machine::get_machine())
-                         .only_kind(Memory::GPU_FB_MEM)
-                         .best_affinity_to(task->target_proc)
-                         .first();
-    Realm::RegionInstance workspaceInst;
-    handle.peft_activation_allocator = new MemoryAllocator(gpu_mem);
-    handle.peft_activation_allocator->create_legion_instance(
-        workspaceInst,
-        info->peft_activation_reserve_space_size,
-        "PEFT Activation Reserve Space");
-  } else {
-    handle.peft_activation_allocator = nullptr;
-  }
-// #endif
 // checkCUDA(cudaMalloc(&handle.workSpace, handle.workSpaceSize));
 #ifdef FF_USE_NCCL
   handle.ncclComm = NULL;

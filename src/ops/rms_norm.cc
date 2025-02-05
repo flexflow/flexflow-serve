@@ -565,7 +565,7 @@ Legion::FutureMap
   regions[1](I/O): input_grad
   regions[2](I): weight
 */
-void RMSNorm::peft_bwd_task(Task const *task,
+bool RMSNorm::peft_bwd_task(Task const *task,
                             std::vector<PhysicalRegion> const &regions,
                             Context ctx,
                             Runtime *runtime) {
@@ -573,8 +573,8 @@ void RMSNorm::peft_bwd_task(Task const *task,
   assert(regions.size() == 3);
   RMSNormMeta *m = *((RMSNormMeta **)task->local_args);
   BatchConfig const *bc = BatchConfig::from_future(task->futures[0]);
-  if (bc->num_active_peft_tokens() == 0) {
-    return;
+  if (!bc->peft_bwd_applies_to_this_layer(m->layer_guid.transformer_layer_id)) {
+    return false;
   }
   GenericTensorAccessorR output_grad = helperGetGenericTensorAccessorRO(
       m->output_type[0], regions[0], task->regions[0], FID_DATA, ctx, runtime);
@@ -589,6 +589,7 @@ void RMSNorm::peft_bwd_task(Task const *task,
     RMSNorm::save_inference_tensors_to_file(
         m, shard_id, bc, {input_grad}, {weight}, {output_grad}, false);
   }
+  return true;
 }
 
 void RMSNorm::serialize(Legion::Serializer &sez) const {
