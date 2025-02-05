@@ -67,8 +67,9 @@ jobs:
           
           ../config/config.linux
           make -j $n_build_cores 
-          sudo make install
-          sudo ldconfig
+          make install
+          # sudo make install
+          # sudo ldconfig
 
       - name: Check availability of flexflow modules in Python
         run: |
