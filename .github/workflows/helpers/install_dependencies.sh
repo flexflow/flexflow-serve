@@ -68,4 +68,5 @@ fi
 sudo rm -rf /var/lib/apt/lists/*
 # Install Rust
 curl https://sh.rustup.rs -sSf | sh -s -- -y
+# shellcheck source=/dev/null
 . "$HOME/.cargo/env"
