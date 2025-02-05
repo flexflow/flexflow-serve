@@ -17,7 +17,7 @@ hip_version=${hip_version:-"empty"}
 ATTACH_GPUS=${ATTACH_GPUS:-true}
 gpu_arg=""
 if $ATTACH_GPUS ; then gpu_arg="--gpus all" ; fi
-FORWARD_STREAMLIT_PORT=${FORWARD_STREAMLIT_PORT:-true}
+FORWARD_STREAMLIT_PORT=${FORWARD_STREAMLIT_PORT:-false}
 port_forward_arg=""
 if $FORWARD_STREAMLIT_PORT ; then
   port_forward_arg+="-p 8501:8501"

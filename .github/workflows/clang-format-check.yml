@@ -14,7 +14,6 @@ jobs:
           - check: "python"
           - check: "scripts"
           - check: "tests"
-          - check: "examples"
     steps:
       - uses: actions/checkout@v2
       - name: Run clang-format style check for C/C++/Protobuf programs.

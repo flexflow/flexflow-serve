@@ -1,8 +1,8 @@
-ARG ff_environment_base_image
+ARG ff_environment_base_image=flexflow-environment-cuda-12.1
 FROM ${ff_environment_base_image}
 
-LABEL org.opencontainers.image.source=https://github.com/flexflow/FlexFlow
-LABEL org.opencontainers.image.description="FlexFlow environment container"
+LABEL org.opencontainers.image.source=https://github.com/flexflow/flexflow-serve
+LABEL org.opencontainers.image.description="flexflow-serve environment container"
 
 SHELL ["/bin/bash", "-c"]
 
