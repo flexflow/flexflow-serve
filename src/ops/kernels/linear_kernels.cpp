@@ -16,6 +16,7 @@
 #include "flexflow/ops/kernels/linear_kernels.h"
 #include "flexflow/ffconst_utils.h"
 #include "flexflow/ops/kernels/decompress_kernels.h"
+#include "flexflow/ops/lora_linear_params.h"
 #include "flexflow/utils/hip_helper.h"
 #include <hip/hip_runtime.h>
 
@@ -72,6 +73,17 @@ LinearMeta::~LinearMeta(void) {
   if (reserveInst != Realm::RegionInstance::NO_INST) {
     reserveInst.destroy();
   }
+}
+
+bool lora_applies_to_this_layer(LinearMeta const *m,
+                                LoraLinearConfig const &config) {
+  for (std::string s : config.target_modules) {
+    std::string n(m->op_name);
+    if (n.find(s) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace Kernels {
@@ -284,6 +296,7 @@ void inference_kernel_wrapper(LinearMeta *m,
 }
 
 void peft_bwd_kernel_wrapper(LinearMeta const *m,
+                             BatchConfig const *bc,
                              void *input_grad_ptr,
                              void *output_grad_ptr,
                              void const *weight_ptr,
@@ -301,6 +314,7 @@ void peft_bwd_kernel_wrapper(LinearMeta const *m,
   }
   if (m->input_type[0] == DT_FLOAT) {
     Internal::peft_bwd_kernel<float>(m,
+                                     bc,
                                      input_grad_ptr,
                                      output_grad_ptr,
                                      weight_ptr,
@@ -311,6 +325,7 @@ void peft_bwd_kernel_wrapper(LinearMeta const *m,
                                      stream);
   } else if (m->input_type[0] == DT_HALF) {
     Internal::peft_bwd_kernel<half>(m,
+                                    bc,
                                     input_grad_ptr,
                                     output_grad_ptr,
                                     weight_ptr,
@@ -573,6 +588,7 @@ void forward_kernel(LinearMeta const *m,
 
 template <typename DT>
 void peft_bwd_kernel(LinearMeta const *m,
+                     BatchConfig const *bc,
                      void *input_grad_ptr,
                      void *output_grad_ptr,
                      void const *kernel_ptr,
@@ -616,6 +632,35 @@ void peft_bwd_kernel(LinearMeta const *m,
   // NOTE: we use beta=1 for input_grad to accumulate gradients when needed
   DT alpha = 1.0f;
   DT beta = m->reset_input_grads[0] ? 0.0f : 1.0f;
+
+  // ensure that we only have one finetuning request, with a single lora
+  int num_peft_requests = 0;
+  bool lora_applies = false;
+  for (int i = 0; i < bc->max_requests_per_batch(); i++) {
+    if (bc->request_completed[i] ||
+        bc->requestsInfo[i].peft_model_id == PEFTModelID::NO_ID ||
+        !bc->requestsInfo[i].peft_bwd) {
+      continue;
+    }
+    num_peft_requests++;
+    std::string peft_model_config_str =
+        std::string(bc->requestsInfo[i].peft_model_config_str);
+    LoraLinearConfig lora_config =
+        LoraLinearConfig::deserialize_from_json_string(peft_model_config_str);
+    if (!lora_applies_to_this_layer(m, lora_config)) {
+      continue;
+    }
+    lora_applies = true;
+  }
+  assert(num_peft_requests == 1 &&
+         "Exactly one PEFT finetuning request is required");
+  // if the request does not have any active lora in the current layer, reset
+  // beta to 0 std::cout << m->op_name << " original beta: " << (float)beta << "
+  // lora_applies: " << lora_applies << std::endl;
+  if (lora_applies) {
+    beta = 1.0f;
+  }
+
   if (input_grad_ptr != NULL) {
     checkCUDA(hipblasGemmEx(m->handle.blas,
                             HIPBLAS_OP_N,
