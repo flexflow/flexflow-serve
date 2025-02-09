@@ -19,6 +19,7 @@ jobs:
     env:
       CUDA_PATH: /usr/local/cuda
       CONDA: "3"
+      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
     steps:
       - name: Set Path
         run: echo "/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/opt/conda/bin:/usr/local/cuda/bin:/usr/local/cuda/include" >> $GITHUB_PATH
@@ -89,6 +90,7 @@ jobs:
     env:
       CUDA_PATH: /usr/local/cuda
       CONDA: "3"
+      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
     steps:
       - name: Set Path
         run: echo "/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/opt/conda/bin:/usr/local/cuda/bin:/usr/local/cuda/include" >> $GITHUB_PATH

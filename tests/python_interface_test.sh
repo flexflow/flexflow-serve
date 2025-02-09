@@ -9,6 +9,12 @@ export FF_HOME
 BUILD_FOLDER="${FF_HOME}/build"
 export BUILD_FOLDER
 
+# Token to access private huggingface models (e.g. LLAMA-2)
+HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-none}
+if [[ "$HUGGINGFACE_TOKEN" != "none" ]]; then
+    huggingface-cli login --token "$HUGGINGFACE_TOKEN"
+fi
+
 installation_status=${1:-"before-installation"}
 echo "Running Python interface tests (installation status: ${installation_status})"
 if [[ "$installation_status" == "before-installation" ]]; then
