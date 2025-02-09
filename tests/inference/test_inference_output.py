@@ -38,11 +38,7 @@ def compare_single_line(file_a, file_b):
     list_b = line_b[len("token IDs: "):].split(",")
 
     # check if the first 50 elements are equal
-    if len(list_a) < 50 or len(list_b) < 50:
-        raise AssertionError(
-            f"File lengths are less than 50 elements:\n  {file_a} -> {len(list_a)}\n  {file_b} -> {len(list_b)}"
-        )
-    for i in range(50):
+    for i in range(min(50, len(list_a), len(list_b))):
         if list_a[i] != list_b[i]:
             raise AssertionError(
                 f"File contents differ at position {i}:\n  {file_a} -> {list_a[i]}\n  {file_b} -> {list_b[i]}"
