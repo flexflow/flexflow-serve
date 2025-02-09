@@ -100,6 +100,7 @@ def main():
             learning_rate=args.learning_rate,
             fp16=True if not args.use_full_precision else False,
             logging_steps=1,
+            report_to="none",
             output_dir=os.path.join(
                 args.output_dir if len(args.output_dir) > 0 else "./",
                 "lora_training_logs",
