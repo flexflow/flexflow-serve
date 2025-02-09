@@ -62,24 +62,16 @@ jobs:
           make -j
 
       - name: Check FlexFlow Python interface (before installation)
-        run: |
-          # export PATH=$CONDA_PREFIX/bin:$PATH
-          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
-          ./tests/python_interface_test.sh before-installation
+        run: ./tests/python_interface_test.sh before-installation
 
       - name: Install FlexFlow
         run: |
-          # export PATH=$CONDA_PREFIX/bin:$PATH
           cd build
           ../config/config.linux
           make install
-          # ldconfig
 
       - name: Check FlexFlow Python interface (after installation)
-        run: |
-          # export PATH=$CONDA_PREFIX/bin:$PATH
-          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
-          ./tests/python_interface_test.sh after-installation
+        run: ./tests/python_interface_test.sh after-installation
 
   inference-tests:
     name: Inference Tests
@@ -136,22 +128,11 @@ jobs:
         env:
           CPP_INFERENCE_TESTS: ${{ vars.CPP_INFERENCE_TESTS }}
         run: |
-          # export PATH=$CONDA_PREFIX/bin:$PATH
-          # export CUDNN_DIR=/usr/local/cuda
-          # export CUDA_DIR=/usr/local/cuda
-          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
-
-          # Inference tests
           source ./build/set_python_envs.sh
           ./tests/inference_tests.sh
       
       - name: Run PEFT tests
         run: |
-          # export PATH=$CONDA_PREFIX/bin:$PATH
-          # export CUDNN_DIR=/usr/local/cuda
-          # export CUDA_DIR=/usr/local/cuda
-          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
-
           source ./build/set_python_envs.sh
           ./tests/peft_test.sh
       
