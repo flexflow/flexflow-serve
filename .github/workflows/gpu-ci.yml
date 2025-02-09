@@ -73,7 +73,7 @@ jobs:
           cd build
           ../config/config.linux
           make install
-          ldconfig
+          # ldconfig
 
       - name: Check FlexFlow Python interface (after installation)
         run: |
