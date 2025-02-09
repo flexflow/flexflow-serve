@@ -15,14 +15,6 @@ jobs:
     runs-on: "runs-on=${{ github.run_id }}/runner=gpu-nvidia"
     env:
       CUDA_PATH: /usr/local/cuda
-    # defaults:
-    #   run:
-    #     shell: bash -l {0} # required to use an activated conda environment
-    # env: 
-    #   CONDA: "3"
-    # container:
-    #   image: ghcr.io/flexflow/flexflow-environment-cuda-12.2:latest
-    #   options: --gpus all --shm-size=8192m
     steps:
       - name: Set Path
         run: echo "/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/opt/conda/bin:/usr/local/cuda/bin:/usr/local/cuda/include" >> $GITHUB_PATH
@@ -54,9 +46,14 @@ jobs:
           auto-activate-base: false
           auto-update-conda: false
 
+      - name: Install Rust
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          . "$HOME/.cargo/env"
+          
       - name: Build FlexFlow
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
+          # export PATH=$CONDA_PREFIX/bin:$PATH
           mkdir build
           cd build
           ../config/config.linux
@@ -64,13 +61,13 @@ jobs:
 
       - name: Check FlexFlow Python interface (before installation)
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
+          # export PATH=$CONDA_PREFIX/bin:$PATH
+          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
           ./tests/python_interface_test.sh before-installation
 
       - name: Install FlexFlow
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
+          # export PATH=$CONDA_PREFIX/bin:$PATH
           cd build
           ../config/config.linux
           make install
@@ -78,28 +75,25 @@ jobs:
 
       - name: Check FlexFlow Python interface (after installation)
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
+          # export PATH=$CONDA_PREFIX/bin:$PATH
+          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
           ./tests/python_interface_test.sh after-installation
 
   inference-tests:
     name: Inference Tests
     runs-on: "runs-on=${{ github.run_id }}/runner=gpu-nvidia"
-    defaults:
-      run:
-        shell: bash -l {0} # required to use an activated conda environment
-    env: 
-      CONDA: "3"
-      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
-    # container:
-    #   image: ghcr.io/flexflow/flexflow-environment-cuda-12.2:latest
-    #   options: --gpus all --shm-size=8192m
+    env:
+      CUDA_PATH: /usr/local/cuda
     steps:
-      - name: Display NVIDIA SMI and NVCC details
+      - name: Set Path
+        run: echo "/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/opt/conda/bin:/usr/local/cuda/bin:/usr/local/cuda/include" >> $GITHUB_PATH
+      
+      - name: Check GPU/CUDA availability
         run: |
+          printenv CUDA_PATH
+          printenv PATH
+          printenv LD_LIBRARY_PATH
           nvidia-smi
-          nvidia-smi -L
-          nvidia-smi -q -d Memory
           nvcc --version
       
       - name: Display disk space
@@ -121,10 +115,15 @@ jobs:
           environment-file: conda/flexflow.yml
           auto-activate-base: false
           auto-update-conda: false
+      
+      - name: Install Rust
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          . "$HOME/.cargo/env"
 
       - name: Build FlexFlow
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
+          # export PATH=$CONDA_PREFIX/bin:$PATH
           mkdir build
           cd build
           ../config/config.linux
@@ -134,10 +133,10 @@ jobs:
         env:
           CPP_INFERENCE_TESTS: ${{ vars.CPP_INFERENCE_TESTS }}
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
-          export CUDNN_DIR=/usr/local/cuda
-          export CUDA_DIR=/usr/local/cuda
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
+          # export PATH=$CONDA_PREFIX/bin:$PATH
+          # export CUDNN_DIR=/usr/local/cuda
+          # export CUDA_DIR=/usr/local/cuda
+          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
 
           # Inference tests
           source ./build/set_python_envs.sh
@@ -145,10 +144,10 @@ jobs:
       
       - name: Run PEFT tests
         run: |
-          export PATH=$CONDA_PREFIX/bin:$PATH
-          export CUDNN_DIR=/usr/local/cuda
-          export CUDA_DIR=/usr/local/cuda
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
+          # export PATH=$CONDA_PREFIX/bin:$PATH
+          # export CUDNN_DIR=/usr/local/cuda
+          # export CUDA_DIR=/usr/local/cuda
+          # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
 
           source ./build/set_python_envs.sh
           ./tests/peft_test.sh
