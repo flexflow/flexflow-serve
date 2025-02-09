@@ -15,7 +15,6 @@ jobs:
     runs-on: "runs-on=${{ github.run_id }}/runner=gpu-nvidia"
     env:
       CUDA_PATH: /usr/local/cuda
-      PATH: /opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/opt/conda/bin:/usr/local/cuda/bin:/usr/local/cuda/include:${{ env.PATH }}
     # defaults:
     #   run:
     #     shell: bash -l {0} # required to use an activated conda environment
@@ -25,6 +24,8 @@ jobs:
     #   image: ghcr.io/flexflow/flexflow-environment-cuda-12.2:latest
     #   options: --gpus all --shm-size=8192m
     steps:
+      - name: Set Path
+        run: echo "/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/opt/conda/bin:/usr/local/cuda/bin:/usr/local/cuda/include" >> $GITHUB_PATH
       - name: Check GPU/CUDA availability
         run: |
           printenv CUDA_PATH
