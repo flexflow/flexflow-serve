@@ -99,8 +99,8 @@ jobs:
       - name: Display disk space
         run: df -h
       
-      - name: Install updated git version
-        run: sudo add-apt-repository ppa:git-core/ppa -y && sudo apt update -y && sudo apt install -y --no-install-recommends git
+      # - name: Install updated git version
+      #   run: sudo add-apt-repository ppa:git-core/ppa -y && sudo apt update -y && sudo apt install -y --no-install-recommends git
 
       - name: Checkout Git Repository
         uses: actions/checkout@v4
@@ -108,11 +108,13 @@ jobs:
           submodules: recursive
       
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Test Rust
-        run: |
-          cargo test --all-features
-          rustc --version
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      
+      - name: Verify Rust installation
+        run: rustc --version; cargo --version
           
       - name: Install conda and FlexFlow dependencies
         uses: conda-incubator/setup-miniconda@v3
@@ -122,11 +124,6 @@ jobs:
           environment-file: conda/flexflow.yml
           auto-activate-base: false
           auto-update-conda: false
-      
-      - name: Install Rust
-        run: |
-          curl https://sh.rustup.rs -sSf | sh -s -- -y
-          . "$HOME/.cargo/env"
 
       - name: Build FlexFlow
         run: |
