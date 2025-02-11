@@ -746,8 +746,8 @@ class LlamaAlignmentTest(AlignmentTest):
             ff_gradient_name = convert_hf_filename_to_ff(hf_gradient_name)
             ff_gradient = get_ff_tensor(ff_gradient_name, hf_gradient.shape, tp_type=TPType.REPLICATE)
             
-            lora_low_rank_activation_fwd_path = f"/usr/.cache/flexflow/debug/flexflow/fwd/step_{step_idx}/shard_0/layers.{i}.layers.{i}.mlp.down_proj.lora.low_rank_activation"
-            lora_low_rank_activation_bwd_path = f"/usr/.cache/flexflow/debug/flexflow/bwd/step_{step_idx}/shard_0/layers.{i}.layers.{i}.mlp.down_proj.lora.low_rank_activation"
+            lora_low_rank_activation_fwd_path = f"fwd/step_{step_idx}/shard_0/layers.{i}.layers.{i}.mlp.down_proj.lora.low_rank_activation"
+            lora_low_rank_activation_bwd_path = f"bwd/step_{step_idx}/shard_0/layers.{i}.layers.{i}.mlp.down_proj.lora.low_rank_activation"
             lora_low_rank_activation_fwd = load_ff_tensor(lora_low_rank_activation_fwd_path, [16, 128])[:,:self.num_tokens]
             lora_low_rank_activation_fwd = torch.from_numpy(lora_low_rank_activation_fwd)
             lora_low_rank_activation_bwd = load_ff_tensor(lora_low_rank_activation_bwd_path, [16, 24])
