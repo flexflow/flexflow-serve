@@ -13,7 +13,7 @@ concurrency:
 jobs:
   pip-install-flexflow:
     name: Install FlexFlow with pip
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     defaults:
       run:
         shell: bash -l {0} # required to use an activated conda environment

@@ -9,7 +9,7 @@ concurrency:
 jobs:
   build-n-publish:
     name: Build and publish Python 🐍 distributions 📦 to PyPI and TestPyPI
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     permissions:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write

@@ -19,9 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget sudo binut
 
 # Install Python3 with Miniconda
 ARG python_version "latest"
-#RUN MINICONDA_SCRIPT_NAME=Miniconda3-latest-Linux-x86_64.sh; \
-RUN MINICONDA_SCRIPT_NAME=Miniconda3-py311_23.5.2-0-Linux-x86_64.sh; \
-    if [ "$python_version" != "3.8" ] && [ "$python_version" != "3.9" ] && [ "$python_version" != "3.10" ] && [ "$python_version" != "3.11" ] && [ "$python_version" != "latest" ]; then \
+RUN MINICONDA_SCRIPT_NAME=Miniconda3-latest-Linux-x86_64.sh; \
+# RUN MINICONDA_SCRIPT_NAME=Miniconda3-py311_23.5.2-0-Linux-x86_64.sh; \
+    if [ "$python_version" != "3.8" ] && [ "$python_version" != "3.9" ] && [ "$python_version" != "3.10" ] && [ "$python_version" != "3.11" ] && [ "$python_version" != "3.12" ] && [ "$python_version" != "latest" ]; then \
         echo "python_version '${python_version}' is not supported, please choose among {3.8, 3.9, 3.10, 3.11 or latest (default)}"; \
         exit 1; \
     fi; \
@@ -33,6 +33,10 @@ RUN MINICONDA_SCRIPT_NAME=Miniconda3-py311_23.5.2-0-Linux-x86_64.sh; \
         MINICONDA_SCRIPT_NAME=Miniconda3-py310_23.5.2-0-Linux-x86_64.sh; \
     elif [ "${python_version}" = "3.11" ]; then \
         MINICONDA_SCRIPT_NAME=Miniconda3-py311_23.5.2-0-Linux-x86_64.sh; \
+    elif [ "${python_version}" = "3.12" ]; then \
+        MINICONDA_SCRIPT_NAME=Miniconda3-py312_25.1.1-2-Linux-x86_64.sh; \
+    elif [ "${python_version}" = "latest" ]; then \
+        MINICONDA_SCRIPT_NAME=Miniconda3-latest-Linux-x86_64.sh; \
     fi; \
     wget -c -q https://repo.continuum.io/miniconda/${MINICONDA_SCRIPT_NAME} && \
         mv ./${MINICONDA_SCRIPT_NAME} ~/${MINICONDA_SCRIPT_NAME} && \
@@ -93,7 +97,8 @@ RUN  if [ "$FF_GPU_BACKEND" = "hip_cuda" ] || [ "$FF_GPU_BACKEND" = "hip_rocm" ]
         elif [ "$hip_version" = "5.5" ]; then \
             AMD_GPU_SCRIPT_NAME=amdgpu-install_5.5.50500-1_all.deb; \
         fi; \
-        AMD_GPU_SCRIPT_URL="https://repo.radeon.com/amdgpu-install/${hip_version}/ubuntu/focal/${AMD_GPU_SCRIPT_NAME}"; \
+        ubuntu_codename=$(lsb_release -cs); \
+        AMD_GPU_SCRIPT_URL="https://repo.radeon.com/amdgpu-install/${hip_version}/ubuntu/${ubuntu_codename}/${AMD_GPU_SCRIPT_NAME}"; \
         # Download and install AMD GPU software with ROCM and HIP support
         wget $AMD_GPU_SCRIPT_URL; \
         apt-get install -y ./${AMD_GPU_SCRIPT_NAME}; \
@@ -101,14 +106,14 @@ RUN  if [ "$FF_GPU_BACKEND" = "hip_cuda" ] || [ "$FF_GPU_BACKEND" = "hip_rocm" ]
         amdgpu-install -y --usecase=hip,rocm --no-dkms; \
         apt-get install -y hip-dev hipblas miopen-hip rocm-hip-sdk rocm-device-libs; \
         # Install protobuf dependencies
-        apt-get update -y && sudo apt-get install -y pkg-config zip g++ zlib1g-dev autoconf automake libtool make; \
+        # apt-get update -y && sudo apt-get install -y pkg-config zip g++ zlib1g-dev autoconf automake libtool make; \
     else \
         echo "FF_GPU_BACKEND: ${FF_GPU_BACKEND}. Skipping installing HIP dependencies"; \
     fi
 RUN rm -rf /var/lib/apt/lists/*
 
 # Install python packages and other dependencies
-RUN conda install -c conda-forge cmake make pillow cmake-build-extension numpy pandas keras-preprocessing
+RUN conda install -c conda-forge cmake make cmake-build-extension numpy pandas
 # Install Pytorch
 COPY docker/flexflow-environment/install_pytorch.sh /usr/local/bin/install_pytorch.sh
 RUN if [ "$FF_GPU_BACKEND" == "cuda" ] ; then \
@@ -130,5 +135,31 @@ RUN pip3 install streamlit
 # Install Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH /root/.cargo/bin:$PATH
+# RUN ln -s /opt/conda /opt/saturncloud
+# RUN sudo apt update -y && sudo apt install -y openssh-server openssh-client
+# # Make a user called jovyan with uid=1000 and their home directory created
+# RUN useradd -m -u 1000 -s /bin/bash jovyan
+# # Enable passwordless sudo for all users
+# RUN echo "ALL ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+# RUN sudo useradd --uid 1000 --create-home --home-dir /home/jovyan --shell /bin/bash jovyan
+# RUN sudo passwd -d jovyan
+
+# Install sshd
+RUN apt-get update && apt-get install -y openssh-server
+
+# Symlink conda folder to /opt/saturncloud
+RUN ln -s /opt/conda /opt/saturncloud
+
+# Create the jovyan user with UID 1000
+RUN useradd -m -u 1000 -s /bin/bash jovyan
+# Add jovyan to the sudo group
+RUN usermod -aG sudo jovyan
+# Configure passwordless sudo for jovyan
+RUN echo "jovyan ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jovyan && \
+    chmod 440 /etc/sudoers.d/jovyan
+# Set user to jovyan for subsequent commands (optional)
+USER jovyan
+# Set working directory (optional)
+WORKDIR /home/jovyan
 
 ENTRYPOINT ["/bin/bash"]
