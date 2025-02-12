@@ -14,9 +14,9 @@ np.random.seed(0)
 import argparse
 import transformers
 
-if transformers.__version__ < "4.31.0":
+if transformers.__version__ < "4.47.1":
     raise RuntimeError(
-        "Please update the transformers library version to 4.31.0 or above"
+        "Please update the transformers library version to 4.47.1 or above"
     )
 from datasets import load_dataset
 

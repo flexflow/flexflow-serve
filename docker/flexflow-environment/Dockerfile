@@ -121,7 +121,7 @@ RUN if [ "$FF_GPU_BACKEND" == "cuda" ] ; then \
     fi
 RUN rm /usr/local/bin/install_pytorch.sh
 # Various dependencies
-RUN pip3 install "transformers>=4.31.0,<4.48" sentencepiece einops
+RUN pip3 install transformers>=4.47.1 sentencepiece einops
 RUN pip3 install tensorflow notebook
 # PEFT-related
 RUN pip3 install scipy bitsandbytes datasets accelerate loralib triton peft

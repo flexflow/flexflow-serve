@@ -328,7 +328,7 @@ void peft_bwd_kernel(SoftmaxMeta const *m,
       token_ids[j] = bc->tokensInfo[j + tokens_previous_requests + 1].token_id;
     }
 
-    DT scale_factor = 1.0 / (bc->requestsInfo[i].num_tokens_in_batch - 1);
+    DT scale_factor = 1.0 / (bc->requestsInfo[i].num_tokens_in_batch );
     // ignore last token
     checkCUDA(cudaMemsetAsync(
         input_grad_ptr + (tokens_previous_requests +

@@ -20,7 +20,7 @@ dependencies:
     - torchvision>=0.14.1
     - regex
     - onnx
-    - "transformers>=4.31.0,<4.48"
+    - transformers>=4.47.1
     - sentencepiece
     - einops
     - requests
