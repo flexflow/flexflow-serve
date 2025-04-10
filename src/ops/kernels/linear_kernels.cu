@@ -35,7 +35,24 @@ LinearMeta::LinearMeta(FFHandler handler,
   trainable_inputs[0] = li->trainable_inputs[0];
 
   DataType data_type = li->data_type;
+<<<<<<< HEAD
+  this->activation = li->activation;
+  this->kernel_reg_type = li->kernel_reg_type;
+  this->kernel_reg_lambda = li->kernel_reg_lambda;
+  this->use_bias = li->use_bias;
+  this->add_bias_only_once = li->add_bias_only_once;
+  this->profiling = li->profiling;
+  this->inference_debugging = li->inference_debugging;
+  this->enable_peft_finetuning = li->enable_peft_finetuning;
+  this->trainable_inputs[0] = li->trainable_inputs[0];
+  this->weight_ptr_type = this->input_type[0];
+  this->quantization_type = li->quantization_type;
+  this->offload = li->offload;
+  std::strcpy(this->op_name, li->name);
+  this->layer_guid = li->layer_guid;
+=======
   size_t data_size = data_type_size(data_type);
+>>>>>>> streamlit
   // allocate weight and bias in the reserve space for cpu offloading
   if (li->offload) {
     weight_ptr = gpu_mem_allocator.allocate_reserved_untyped(

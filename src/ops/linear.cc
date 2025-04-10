@@ -491,7 +491,6 @@ OpMeta *Linear::init_task_with_dim(Task const *task,
 
   LinearMeta *m = new LinearMeta(
       handle, batch_size, linear, gpu_mem_allocator, in_dim * out_dim);
-
   init_kernel(m, batch_size, out_dim);
 
   return m;

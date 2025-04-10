@@ -110,6 +110,7 @@ struct Request {
     // if left as -1, it will be set to the number of entries in the dataset
     int gradient_accumulation_steps = -1;
     // std::vector<int> finetuning_tokens_per_batch;
+    std::string log_filepath;
   };
   RequestType req_type = REQ_INFERENCE;
   RequestGuid guid = BatchConfig::INVALID_GUID;

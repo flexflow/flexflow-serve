@@ -677,7 +677,8 @@ class LLM:
     ) -> List[GenerationResult]:
          
         for i in range(len(outputs)):
-            outputs[i].output_text = outputs[i].output_text[len(requests[i].prompt) + padding:]
+            # outputs[i].output_text = outputs[i].output_text[len(requests[i].prompt) + padding:]
+            outputs[i].output_text = outputs[i].output_text
         return outputs
 
     def generate(

@@ -271,7 +271,8 @@ class FlexFlowLLAMA(FlexFlowModel):
 
         if self.ffconfig.enable_peft:
             # TODO: add attention projections
-            self.ffmodel.add_lora_layers(["gate_proj", "up_proj", "down_proj", "o_proj", "qkv_proj"])
+            # self.ffmodel.add_lora_layers(["gate_proj", "up_proj", "down_proj", "o_proj", "qkv_proj"])
+            self.ffmodel.add_lora_layers(["down_proj"])
 
 
     def convert_hf_weight_name(name):

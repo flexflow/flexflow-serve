@@ -2,7 +2,10 @@ import streamlit as st
 import requests
 import os, json
 from huggingface_hub import model_info
-
+import threading
+import time
+import pandas as pd
+from multiprocessing import Process, Pipe
 
 # App title
 st.set_page_config(page_title="🚀💻 FlexLLM Server", layout="wide")
@@ -15,6 +18,7 @@ GET_DATASET_CONFIGS_URL = "http://localhost:8080/get_dataset_configs/"
 GET_DATASET_SPLITS_URL = "http://localhost:8080/get_dataset_splits/"
 GET_DATASET_COLUMNS_URL = "http://localhost:8080/get_dataset_columns/"
 UPLOAD_PEFT_MODEL_URL = "http://localhost:8080/upload_peft_model/"
+PROGRESS_URL = "http://localhost:8080/training_progress/"
 
 # Initialize session state variables
 if 'added_adapters' not in st.session_state:
@@ -42,6 +46,9 @@ def clear_chat_history():
 def generate_llama3_response(prompt_input):
     system_prompt="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Please ensure that your responses are positive in nature."
     
+    print("---Front: here is inference request data----")
+    print(prompt)
+
     # Send request to FastAPI server
     response = requests.post(
         CHAT_URL,
@@ -63,6 +70,9 @@ def generate_llama3_response(prompt_input):
         return f"{result['detail']}"
 
 finetune_result = None
+st.session_state.start_finetune = None
+st.session_state.request_data = None
+st.session_state.peft_model_id = None
 
 # Sidebar
 with st.sidebar:
@@ -75,7 +85,7 @@ with st.sidebar:
         st.sidebar.button('Clear Chat History', on_click=clear_chat_history)
 
         st.subheader('Generation parameters')
-        max_length = st.sidebar.slider('Max generation length', min_value=64, max_value=2048, value=1024, step=8)
+        max_length = st.sidebar.slider('Max generation length', min_value=64, max_value=2048, value=256, step=8)
         # selected_model = st.sidebar.selectbox('Choose a Llama2 model', ['Llama2-7B', 'Llama2-13B', 'Llama2-70B'], key='selected_model')
         decoding_method = st.sidebar.selectbox('Decoding method', ['Greedy decoding (default)', 'Sampling'], key='decoding_method')
         temperature = st.sidebar.slider('temperature', min_value=0.01, max_value=5.0, value=0.1, step=0.01, disabled=decoding_method == 'Greedy decoding (default)')
@@ -133,11 +143,12 @@ with st.sidebar:
                 st.success('Proceed to finetuning your model!', icon='👉')
                 st.session_state.hf_token = hf_token
         
-        # PEFT model name
+        # Upload PEFT model information
         peft_model_name = st.text_input(
-            "Enter the PEFT model name:", 
+            "Enter the PEFT model name to upload to Hugging Face:",
             help="The name of the PEFT model should start with the username associated with the provided HF token, followed by '/'ß. E.g. 'username/peft-base-uncased'"
         )
+        private = st.checkbox("Upload as a private model")
         
         # Dataset selection
         dataset_option = st.radio("Choose dataset source:", ["Upload JSON", "Hugging Face Dataset"])
@@ -225,20 +236,12 @@ with st.sidebar:
         lora_rank = st.number_input("LoRA rank", min_value=2, max_value=64, value=16, step=2)
         lora_alpha = st.number_input("LoRA alpha", min_value=2, max_value=64, value=16, step=2)
         target_modules = st.multiselect("Target modules", ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "lm_head"], default=["down_proj"])
-        learning_rate = st.number_input("Learning rate", min_value=1e-6, max_value=1e-3, value=1e-5, step=1e-6)
+        learning_rate = st.number_input("Learning rate", min_value=0.00001, max_value=1.0, value=0.001, step=0.0001, format="%.4f")
         optimizer_type = st.selectbox("Optimizer type", ["SGD", "Adam", "AdamW", "Adagrad", "Adadelta", "Adamax", "RMSprop"])
         momentum = st.number_input("Momentum", min_value=0.0, max_value=1.0, value=0.0, step=0.01)
         weight_decay = st.number_input("Weight decay", min_value=0.0, max_value=1.0, value=0.0, step=0.01)
         nesterov = st.checkbox("Nesterov")
         max_training_epochs = st.number_input("Max training epochs", min_value=1, max_value=5000, value=10, step=50)
-
-        # Upload model information
-        st.subheader("Upload to Hugging Face")
-        upload_peft_model_id = st.text_input(
-            "Enter the HF Model ID to upload:",
-            help="Example: 'username/my-finetuned-model'"
-        )
-        private = st.checkbox("Upload as a private model")
 
         # Start finetuning button
         if st.button("Start Finetuning"):
@@ -250,7 +253,7 @@ with st.sidebar:
                 st.error("Please enter all Hugging Face dataset information.")
             else:
                 # Prepare the request data
-                request_data = {
+                st.session_state.request_data = {
                     "token": hf_token,
                     "peft_model_id": peft_model_name,
                     "dataset_option": dataset_option,
@@ -264,43 +267,27 @@ with st.sidebar:
                     "nesterov": nesterov,
                     "max_training_epochs": max_training_epochs,
                 }
-                
+
                 if dataset_option == "Upload JSON":
-                    request_data["dataset"] = dataset
+                    st.session_state.request_data["dataset"] = dataset
                 else:
-                    request_data["dataset_name"] = dataset_name
-                    request_data["config_name"] = selected_config
-                    request_data["selected_split"] = selected_split
-                    request_data["selected_column"] = selected_column
+                    st.session_state.request_data["dataset_name"] = dataset_name
+                    st.session_state.request_data["config_name"] = selected_config
+                    st.session_state.request_data["selected_split"] = selected_split
+                    st.session_state.request_data["selected_column"] = selected_column
+                
+                st.session_state.upload_request_data = {
+                    "token": hf_token,
+                    "peft_model_id": peft_model_name,
+                    "upload_peft_model_id": peft_model_name,
+                    "private": private
+                }
+                st.session_state.peft_model_id = peft_model_name
 
-                print("---Front: here is request data----")
-                print(request_data)
-                # Send finetuning request to FastAPI server
-                with st.spinner("Finetuning in progress..."):
-                    finetune_response = requests.post(FINETUNE_URL, json=request_data)
+                print("---Front: here is finetune request data----")
+                print(st.session_state.request_data)
 
-                finetune_result = finetune_response.json()
-                if finetune_response.status_code == 200:
-                    st.success("Finetuning completed successfully!")
-
-                    # Start uploading model to hf
-                    upload_request_data = {
-                        "token": hf_token,
-                        "peft_model_id": peft_model_name,
-                        "upload_peft_model_id": upload_peft_model_id,
-                        "private": private
-                    }
-
-                    with st.spinner("Uploading fine-tuned model to Hugging Face..."):
-                        upload_response = requests.post(UPLOAD_PEFT_MODEL_URL, json=upload_request_data)
-
-                    upload_result = upload_response.json()
-                    if upload_response.status_code == 200:
-                        st.success(f"{upload_peft_model_id} Model uploaded successfully to Hugging Face!")
-                    else:
-                        st.error(f"Upload failed: {upload_result.get('detail', 'Unknown error occurred.')}")
-                else:
-                    st.error(f"Finetuning failed: {finetune_result.get('detail', 'Unknown error occurred.')}")
+                st.session_state.start_finetune = True
 
 if page == "Chat":
     # Display or clear chat messages
@@ -328,9 +315,81 @@ if page == "Chat":
         message = {"role": "assistant", "content": full_response}
         st.session_state.messages.append(message)
 elif page == "Finetune":
+    # st.subheader("📈 Training Progress")
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    # Send finetuning request to FastAPI server
+    # Send the finetuning request in a separate thread
+    if st.session_state.start_finetune:
+        st.subheader("📈 Training Progress")
+        def run_finetune_request():
+            finetune_response = requests.post(FINETUNE_URL, json=st.session_state.request_data)
+            st.session_state.finetune_response = finetune_response
+
+        t = threading.Thread(target=run_finetune_request)
+        add_script_run_ctx(t, get_script_run_ctx())
+        t.start()
+
+        time.sleep(3)
+        if "finetune_response" in st.session_state and st.session_state.finetune_response.status_code != 200:
+            st.error(f"{st.session_state.finetune_response.json().get('detail', 'Unknown error occurred.')}")
+            # 409
+        
+        # 2. Meanwhile: poll training progress and update UI
+        progress_placeholder = st.empty()
+        chart_placeholder = st.empty()
+        status_placeholder = st.empty()
+
+        while True:
+            try:
+                response = requests.get(PROGRESS_URL)
+                st.session_state.progress = response.json()
+            except:
+                st.warning("Failed to get training progress.")
+                continue
+
+            current_epoch = st.session_state.progress["current_epoch"]
+            max_epochs = st.session_state.progress.get("max_epochs", 1)
+            loss_history = st.session_state.progress.get("loss_history", [])
+
+            # Progress bar
+            progress_pct = current_epoch / max_epochs if max_epochs else 0
+            progress_placeholder.progress(progress_pct, text=f"Epoch {current_epoch}/{max_epochs}")
+
+            # Live loss chart
+            if loss_history:
+                loss_df = pd.DataFrame({"Loss": loss_history})
+                loss_df.index += 1  # Epochs start from 1
+                chart_placeholder.line_chart(loss_df)
+                status_placeholder.info(f"Latest Loss: {loss_history[-1]:.4f}")
+
+            if st.session_state.progress["status"] == "done":
+                break
+            
+            time.sleep(2)  # update every 2 seconds
+
+        while not "finetune_response" in st.session_state:
+            time.sleep(2)
+
+        finetune_result = st.session_state.finetune_response.json()
+        if st.session_state.finetune_response.status_code == 200:
+            st.success("Finetuning completed successfully!")
+
+            # Start uploading model to hf
+            with st.spinner("Uploading fine-tuned model to Hugging Face..."):
+                upload_response = requests.post(UPLOAD_PEFT_MODEL_URL, json=st.session_state.upload_request_data)
+
+            upload_result = upload_response.json()
+            if upload_response.status_code == 200:
+                st.success(f"{peft_model_id} Model uploaded successfully to Hugging Face!")
+            else:
+                st.error(f"Upload failed: {upload_result.get('detail', 'Unkifnown error occurred.')}")
+        elif st.session_state.finetune_response.status_code != 409:
+            st.error(f"Finetuning failed: {finetune_result.get('detail', 'Unknown error occurred.')}")
+
     # Print out the number of entries
     if finetune_result and finetune_result.get("total_entries") and finetune_result.get("remaining_entries"):
         st.write(f"Dataset loaded: {finetune_result['total_entries']} entries found.")
         st.write(f"{finetune_result['remaining_entries']} entries remaining after filtering with max sequence length.")
+    # elif not "progress" in st.session_state:
     else:
         st.write("Use the sidebar to configure and start finetuning.")

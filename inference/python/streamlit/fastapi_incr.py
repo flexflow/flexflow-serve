@@ -23,7 +23,7 @@ Running Instructions:
 """
 
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 import flexflow.serve as ff
 from flexflow.core import *
@@ -37,7 +37,10 @@ from typing import Optional, List, Dict
 import time
 from huggingface_hub import hf_hub_download, HfFolder
 from datasets import get_dataset_config_names, get_dataset_split_names, load_dataset
-import time
+import re, threading, io, sys
+from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from transformers import AutoTokenizer
 
 # Initialize FastAPI application
 app = FastAPI()
@@ -115,15 +118,18 @@ def get_configs():
         ff_init_configs = {
             # required parameters
             "num_gpus": 4,
-	        "memory_per_gpu": 34000,
+	        "memory_per_gpu": 36000,
+            # "memory_per_gpu": 30000,
+            # "zero_copy_memory_per_node": 180000,
             "zero_copy_memory_per_node": 40000,
-            "log_instance_creation": True,
+            "log_instance_creation": False,
             # optional parameters
-            "num_cpus": 4,
-            "legion_utility_processors": 8,
+            "num_cpus": 16,
+            "cpu_memory_per_node": 2048,
+            "legion_utility_processors": 16,
             "data_parallelism_degree": 1,
-            "tensor_parallelism_degree": 1,
-            "pipeline_parallelism_degree": 4,
+            "tensor_parallelism_degree": 4,
+            "pipeline_parallelism_degree": 1,
             "offload": False,
             "offload_reserve_space_size": 8 * 1024, # 8GB
             "use_4bit_quantization": False,
@@ -136,7 +142,8 @@ def get_configs():
         }
         llm_configs = {
             # required parameters
-            "llm_model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "llm_model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+            # "llm_model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
             # optional parameters
             "cache_path": os.environ.get("FF_CACHE_PATH", ""),
             "refresh_cache": False,
@@ -144,7 +151,7 @@ def get_configs():
             "prompt": "",
             "output_file": "",
             "max_requests_per_batch": 128,
-            "max_seq_length": 3000,
+            "max_seq_length": 4096,
             "max_tokens_per_batch": 128,
             "max_concurrent_adapters": 4,
             "num_kv_cache_slots": 100000,
@@ -248,6 +255,7 @@ async def chat_completions(request: ChatCompletionRequest):
             raise HTTPException(status_code=503, detail="LLM model is not initialized.")
 
         print("received request:", request)
+        results = None
 
         # Use the PEFT adapter if specified
         if request.peft_model_id:
@@ -261,14 +269,21 @@ async def chat_completions(request: ChatCompletionRequest):
                 max_new_tokens=request.max_new_tokens,
                 peft_model_id=peft_model_cffi,
             )
-            result = llm.generate(request)[0].output_text.decode("utf-8")
+            results = await run_in_threadpool(llm.generate, request)
+            # result = llm.generate(request)[0].output_text.decode("utf-8")
         else:
-            result = llm.generate(
+            results = await run_in_threadpool(llm.generate, 
                 [message.dict() for message in request.messages],
                 max_new_tokens=request.max_new_tokens,
-            )[0].output_text.decode("utf-8")
+            )
+            # result = llm.generate(
+            #     [message.dict() for message in request.messages],
+            #     max_new_tokens=request.max_new_tokens,
+            # )[0].output_text.decode("utf-8")
 
-        print("Returning response:", result)
+        result = results[0].output_text.decode("utf-8")
+
+        print("----Returning response:", result)
         return {"response": result, "status": "success"}
 
     except Exception as e:
@@ -314,122 +329,179 @@ async def get_dataset_columns(dataset_name: str, split: str, config_name: Option
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching dataset columns: {str(e)}")
 
+training_progress = {
+    "current_epoch": 0,
+    "max_epochs": 0,
+    "loss_history": [],
+    "status": "idle",
+}
+seen_lines = set()
+
+@app.get("/training_progress/")
+async def get_training_progress():
+    cache_folder = os.path.expanduser(llm.cache_path)
+    log_file_path = os.path.join(cache_folder, "logs", "finetune_log.log")
+
+    pattern = r"Completed finetuning epoch (\d+)/(\d+), Loss: ([0-9.]+)"
+    try:
+        with open(log_file_path, "r") as f:
+            log_data = f.readlines()
+    except FileNotFoundError:
+        return JSONResponse(content={"error": "Log file not found"}, status_code=404)
+
+    for line in log_data:
+        if line in seen_lines:
+            continue
+        seen_lines.add(line)
+
+        match = re.search(pattern, line)
+        if match:
+            epoch, max_epoch, loss = match.groups()
+            training_progress["current_epoch"] = int(epoch)
+            training_progress["max_epochs"] = int(max_epoch)
+            training_progress["loss_history"].append(float(loss))
+
+    if training_progress["current_epoch"] >= training_progress["max_epochs"]:
+        training_progress["status"] = "done"
+
+    return JSONResponse(content=training_progress)
+
+
 # API endpoint for finetuning request
 @app.post("/finetuning/")
 async def finetune(request: FinetuneRequest):
     """
     Endpoint to start LoRA finetuning based on the provided parameters.
     """
-    try:
-        if llm is None:
-            raise HTTPException(status_code=503, detail="LLM model is not initialized.")
+    # try:
+    if llm is None:
+        raise HTTPException(status_code=503, detail="LLM model is not initialized.")
 
-        print("received request:", request)
+    print("received request:", request)
 
-        llm.download_peft_adapter_if_needed(request.peft_model_id)
-
-        if request.optimizer_type not in OPTIMIZER_TYPE_MAP:
-            raise ValueError(f"Unsupported optimizer type: {request.optimizer_type}")
-
-        optimizer_type = OPTIMIZER_TYPE_MAP[request.optimizer_type]
-
-        # Prepare LoRA configuration for finetuning
-        lora_finetuning_config = ff.LoraLinearConfig(
-            llm.cache_path,
-            request.peft_model_id.lower(),
-            trainable=True,
-            init_lora_weights=True,
-            base_model_name_or_path=llm.model_name,
-            optimizer_type=optimizer_type,
-            target_modules=request.target_modules,
-            optimizer_kwargs={
-                "learning_rate": request.learning_rate,
-                "momentum": request.momentum,
-                "weight_decay": request.weight_decay,
-                "nesterov": request.nesterov,
-            },
+    if training_progress["status"] == "training":
+        raise HTTPException(
+            status_code=409,
+            detail="A finetuning job is already running. Please wait for it to finish.",
         )
 
-        llm.register_peft_adapter(lora_finetuning_config)
+    if request.optimizer_type not in OPTIMIZER_TYPE_MAP:
+        raise ValueError(f"Unsupported optimizer type: {request.optimizer_type}")
 
-        cache_folder = os.path.expanduser(llm.cache_path)
-        # Load the dataset
-        file_path = None
-        total_entries = None
-        remaining_entries = None
-        if request.dataset_option == "Upload JSON":
-            dataset_dir = os.path.join(cache_folder, "datasets", "uploaded")
-            os.makedirs(dataset_dir, exist_ok=True)
+    optimizer_type = OPTIMIZER_TYPE_MAP[request.optimizer_type]
 
-            file_path = os.path.join(dataset_dir, "dataset.json")
-            with open(file_path, "w") as f:
-                json.dump(request.dataset, f)
-        elif request.dataset_option == "Hugging Face Dataset":
-            dataset_dir = os.path.join(cache_folder, "datasets", "huggingface")
-            os.makedirs(dataset_dir, exist_ok=True)
+    # Prepare LoRA configuration for finetuning
+    lora_finetuning_config = ff.LoraLinearConfig(
+        llm.cache_path,
+        request.peft_model_id.lower(),
+        trainable=True,
+        init_lora_weights=True,
+        base_model_name_or_path=llm.model_name,
+        optimizer_type=optimizer_type,
+        target_modules=request.target_modules,
+        optimizer_kwargs={
+            "learning_rate": request.learning_rate,
+            "momentum": request.momentum,
+            "weight_decay": request.weight_decay,
+            "nesterov": request.nesterov,
+        },
+    )
 
-            json_subdir = os.path.join(dataset_dir, request.dataset_name)
-            os.makedirs(json_subdir, exist_ok=True)
-            
-            from transformers import AutoTokenizer
-            # Load dataset from Hugging Face
-            dataset_info = f"{request.dataset_name}/{request.config_name}/{request.selected_split}" \
-                if request.config_name else f"{request.dataset_name}/{request.selected_split}"
-            json_filename = f"{dataset_info.replace('/', '_')}.json"
+    llm.register_peft_adapter(lora_finetuning_config)
 
-            print(f"Loading dataset: {dataset_info}")
-            dataset = load_dataset(request.dataset_name, data_dir=request.config_name, split=request.selected_split)
+    cache_folder = os.path.expanduser(llm.cache_path)
+    # Load the dataset
+    file_path = None
+    total_entries = None
+    remaining_entries = None
+    if request.dataset_option == "Upload JSON":
+        dataset_dir = os.path.join(cache_folder, "datasets", "uploaded")
+        os.makedirs(dataset_dir, exist_ok=True)
 
-            total_entries = len(dataset)
-            print(f"Found {total_entries} entries in the dataset.")
+        file_path = os.path.join(dataset_dir, "dataset.json")
+        with open(file_path, "w") as f:
+            json.dump(request.dataset, f)
+    elif request.dataset_option == "Hugging Face Dataset":
+        dataset_dir = os.path.join(cache_folder, "datasets", "huggingface")
+        os.makedirs(dataset_dir, exist_ok=True)
 
-            max_length = 10000 # Change if needed
+        json_subdir = os.path.join(dataset_dir, request.dataset_name)
+        os.makedirs(json_subdir, exist_ok=True)
+        
+        
+        # Load dataset from Hugging Face
+        dataset_info = f"{request.dataset_name}/{request.config_name}/{request.selected_split}" \
+            if request.config_name else f"{request.dataset_name}/{request.selected_split}"
+        json_filename = f"{dataset_info.replace('/', '_')}.json"
 
-            # Load a pre-trained tokenizer.
-            tokenizer = AutoTokenizer.from_pretrained(request.peft_model_id)
+        print(f"Loading dataset: {dataset_info}")
+        dataset = load_dataset(request.dataset_name, data_dir=request.config_name, split=request.selected_split)
 
-            # Function to tokenize text and add a token count.
-            def tokenize_count(example):
-                # Tokenize the selected field
-                tokens = tokenizer.tokenize(example[request.selected_column])
-                # Save the number of tokens to a new field
-                example["token_count"] = len(tokens)
-                return example
+        total_entries = len(dataset)
+        print(f"Found {total_entries} entries in the dataset.")
 
-            # Apply the function to each example in the dataset.
-            tokenized_dataset = dataset.map(tokenize_count)
-            # Filter entries with token_count less than max_length.
-            filtered_dataset = tokenized_dataset.filter(lambda example: example["token_count"] < min(max_length, llm.max_seq_length))
-            # Extract the original selected field from the filtered examples.
-            text_list = filtered_dataset[request.selected_column]
+        max_length = 10000 # Change if needed
 
-            remaining_entries = len(filtered_dataset)
-            print(f"Filtering out entries longer than {llm.max_seq_length} tokens...")
-            print(f"{remaining_entries} entries remaining after filtering.")
+        # Load a pre-trained tokenizer.
+        tokenizer = AutoTokenizer.from_pretrained(llm.model_name)
 
-            # Save the text list to a JSON file.
-            file_path = os.path.join(json_subdir, json_filename)
-            with open(file_path, "w") as f:
-                json.dump(text_list, f, indent=2)
-            
-        print(f"Dataset saved to {file_path}")
+        # Function to tokenize text and add a token count.
+        def tokenize_count(example):
+            # Tokenize the selected field
+            tokens = tokenizer.tokenize(example[request.selected_column])
+            # Save the number of tokens to a new field
+            example["token_count"] = len(tokens)
+            return example
 
-        # Create finetuning request
-        finetuning_request = ff.Request(
-            ff.RequestType.REQ_FINETUNING,
-            peft_model_id=llm.get_ff_peft_id(lora_finetuning_config),
-            dataset_filepath=file_path,
-            max_training_epochs=request.max_training_epochs,
-        )
+        # Apply the function to each example in the dataset.
+        tokenized_dataset = dataset.map(tokenize_count)
+        # Filter entries with token_count less than max_length.
+        filtered_dataset = tokenized_dataset.filter(lambda example: example["token_count"] < min(max_length, llm.max_seq_length))
+        # Extract the original selected field from the filtered examples.
+        text_list = filtered_dataset[request.selected_column]
 
-        results = llm.generate(finetuning_request)
-        print(f"Finish fine-tuning")
+        remaining_entries = len(filtered_dataset)
+        print(f"Filtering out entries longer than {llm.max_seq_length} tokens...")
+        print(f"{remaining_entries} entries remaining after filtering.")
 
-        return {"results": results, "status": "success", "total_entries": total_entries, "remaining_entries": remaining_entries}
+        # Save the text list to a JSON file.
+        file_path = os.path.join(json_subdir, json_filename)
+        with open(file_path, "w") as f:
+            json.dump(text_list, f, indent=2)
 
-    except Exception as e:
-        error_message = f"Error during finetuning: {str(e)}"
-        raise HTTPException(status_code=500, detail=error_message)
+    # Create log file
+    log_filepath = os.path.join(cache_folder, "logs", "finetune_log.log")
+    os.makedirs(os.path.dirname(log_filepath), exist_ok=True)
+    # Clear the file if it already exists
+    with open(log_filepath, "w") as f:
+        f.write("")
+
+    # Create finetuning request
+    finetuning_request = ff.Request(
+        ff.RequestType.REQ_FINETUNING,
+        peft_model_id=llm.get_ff_peft_id(lora_finetuning_config),
+        dataset_filepath=file_path,
+        max_training_epochs=request.max_training_epochs,
+        log_filepath=log_filepath,
+    )
+
+    # Set training status
+    training_progress.update({
+        "current_epoch": 0,
+        "max_epochs": request.max_training_epochs,
+        "loss_history": [],
+        "status": "training",
+    })
+
+    results = await run_in_threadpool(llm.generate, finetuning_request)
+    # results = llm.generate(finetuning_request)
+    print(f"Finish fine-tuning")
+
+    return {"results": results, "status": "success", "total_entries": total_entries, "remaining_entries": remaining_entries}
+
+    # except Exception as e:
+    #     error_message = f"Error during finetuning: {str(e)}"
+    #     raise HTTPException(status_code=500, detail=error_message)
 
 
 # API endpoint for uploading model request
@@ -438,122 +510,122 @@ async def upload_peft_model(request: UploadModelRequest):
     """
     Endpoint to upload the fine-tuned PEFT model to Hugging Face Hub.
     """
-    try:
-        if llm is None:
-            raise HTTPException(status_code=503, detail="LLM model is not initialized.")
+    # try:
+        # if llm is None:
+        #     raise HTTPException(status_code=503, detail="LLM model is not initialized.")
 
-        from transformers import AutoModelForCausalLM
-        from peft import get_peft_model
-        import torch
-        import numpy as np
+    from transformers import AutoModelForCausalLM
+    from peft import get_peft_model
+    import torch
+    import numpy as np
+    print("Upload model request:", request)
 
-        cache_folder = os.path.expanduser(llm.cache_path)
-        lora_config_filepath = os.path.join(
-            cache_folder, 
-            "finetuned_models", 
-            request.peft_model_id.lower(), 
-            "config", 
-            "ff_config.json"
+    cache_folder = os.path.expanduser(llm.cache_path)
+    lora_config_filepath = os.path.join(
+        cache_folder, 
+        "finetuned_models", 
+        request.peft_model_id.lower(), 
+        "config", 
+        "ff_config.json"
+    )
+    
+    TIMEOUT_SECONDS = 30
+    start_time = time.time()
+    while not os.path.exists(lora_config_filepath):
+        if time.time() - start_time > TIMEOUT_SECONDS:
+            raise TimeoutError(f"Timeout: {lora_config_filepath} not found after {TIMEOUT_SECONDS} seconds.")
+        time.sleep(0.5)  # Check every 0.5 seconds
+
+    peft_config = ff.LoraLinearConfig.from_jsonfile(lora_config_filepath)
+    hf_peft_config = peft_config.to_hf_config()
+
+    # Load model
+    model = AutoModelForCausalLM.from_pretrained(
+        peft_config.base_model_name_or_path,
+        torch_dtype=torch.float32 if peft_config.precision == "fp32" else torch.float16,
+        device_map=None  # Prevent meta tensor issues
+    )
+    model = get_peft_model(model, hf_peft_config, autocast_adapter_dtype=False)
+    
+    in_dim = model.config.intermediate_size
+    out_dim = model.config.hidden_size
+
+    weight_folder = os.path.join(
+        cache_folder, "finetuned_models", request.peft_model_id.lower(), "weights", "shard_0"
+    )
+    num_shards = 1
+    while os.path.exists(weight_folder.replace("shard_0", f"shard_{num_shards}")):
+        num_shards += 1
+    if not in_dim % num_shards == 0:
+        raise ValueError(
+            f"Number of shards ({num_shards}) must divide the input dimension ({in_dim})"
         )
-        
-        TIMEOUT_SECONDS = 30
-        start_time = time.time()
-        while not os.path.exists(lora_config_filepath):
-            if time.time() - start_time > TIMEOUT_SECONDS:
-                raise TimeoutError(f"Timeout: {lora_config_filepath} not found after {TIMEOUT_SECONDS} seconds.")
-            time.sleep(0.5)  # Check every 0.5 seconds
 
-        peft_config = ff.LoraLinearConfig.from_jsonfile(lora_config_filepath)
-        hf_peft_config = peft_config.to_hf_config()
+    lora_weight_files = os.listdir(weight_folder)
+    for lora_file in sorted(lora_weight_files):
+        lora_filename = ".weight".join(lora_file.split(".weight")[:-1])
+        hf_parameter_name = f"base_model.model.model.{lora_filename}.default.weight"
+        if hf_parameter_name not in model.state_dict().keys():
+            raise KeyError(f"Parameter {lora_file} not found in HF model.")
 
-        # Load model
-        model = AutoModelForCausalLM.from_pretrained(
-            peft_config.base_model_name_or_path,
-            torch_dtype=torch.float32 if peft_config.precision == "fp32" else torch.float16,
-            device_map=None  # Prevent meta tensor issues
-        )
-        model = get_peft_model(model, hf_peft_config, autocast_adapter_dtype=False)
-        
-        in_dim = model.config.intermediate_size
-        out_dim = model.config.hidden_size
+        ff_dtype = np.float32 if peft_config.precision == "fp32" else np.float16
+        weight_path = os.path.join(weight_folder, lora_file)
+        # LoRA_A: [in_dim, rank]
+        # LoRA_B: [rank, out_dim]
+        if "lora_A" in lora_file:
+            weight_data = []
+            for shard_id in range(num_shards):
+                weight_path_shard = weight_path.replace("shard_0", f"shard_{shard_id}")
+                weight_data_shard = np.fromfile(weight_path_shard, dtype=ff_dtype)
+                weight_data_shard = weight_data_shard.reshape(
+                    (in_dim // num_shards, peft_config.rank), order="F"
+                )
+                weight_data.append(weight_data_shard)
+            weight_data = np.concatenate(weight_data, axis=0).T
+        elif "lora_B" in lora_file:
+            weight_data = np.fromfile(weight_path, dtype=ff_dtype)
+            weight_data = weight_data.reshape((peft_config.rank, out_dim), order="F").T
+        weight_tensor = torch.from_numpy(weight_data)
 
-        weight_folder = os.path.join(
-            cache_folder, "finetuned_models", request.peft_model_id.lower(), "weights", "shard_0"
-        )
-        num_shards = 1
-        while os.path.exists(weight_folder.replace("shard_0", f"shard_{num_shards}")):
-            num_shards += 1
-        if not in_dim % num_shards == 0:
+        param = model.state_dict()[hf_parameter_name]
+
+        actual_numel = weight_tensor.numel()
+        expected_numel = param.numel()
+        if actual_numel != expected_numel:
             raise ValueError(
-                f"Number of shards ({num_shards}) must divide the input dimension ({in_dim})"
+                f"Parameter {lora_file} has unexpected parameter count: {actual_numel} (actual) != {expected_numel} (expected)"
             )
 
-        lora_weight_files = os.listdir(weight_folder)
-        for lora_file in sorted(lora_weight_files):
-            lora_filename = ".weight".join(lora_file.split(".weight")[:-1])
-            hf_parameter_name = f"base_model.model.model.{lora_filename}.default.weight"
-            if hf_parameter_name not in model.state_dict().keys():
-                raise KeyError(f"Parameter {lora_file} not found in HF model.")
+        if weight_tensor.shape != param.shape:
+            raise ValueError(
+                f"Parameter {lora_file} has unexpected shape: {weight_tensor.shape} (actual) != {param.shape} (expected)"
+            )
 
-            ff_dtype = np.float32 if peft_config.precision == "fp32" else np.float16
-            weight_path = os.path.join(weight_folder, lora_file)
-            # LoRA_A: [in_dim, rank]
-            # LoRA_B: [rank, out_dim]
-            if "lora_A" in lora_file:
-                weight_data = []
-                for shard_id in range(num_shards):
-                    weight_path_shard = weight_path.replace("shard_0", f"shard_{shard_id}")
-                    weight_data_shard = np.fromfile(weight_path_shard, dtype=ff_dtype)
-                    weight_data_shard = weight_data_shard.reshape(
-                        (in_dim // num_shards, peft_config.rank), order="F"
-                    )
-                    weight_data.append(weight_data_shard)
-                weight_data = np.concatenate(weight_data, axis=0).T
-            elif "lora_B" in lora_file:
-                weight_data = np.fromfile(weight_path, dtype=ff_dtype)
-                weight_data = weight_data.reshape((peft_config.rank, out_dim), order="F").T
-            weight_tensor = torch.from_numpy(weight_data)
+        if weight_tensor.dtype != param.dtype:
+            raise ValueError(
+                f"Parameter {lora_file} has unexpected dtype: {weight_tensor.dtype} (actual) != {param.dtype} (expected)"
+            )
 
-            param = model.state_dict()[hf_parameter_name]
+        with torch.no_grad():
+            param.copy_(weight_tensor)
 
-            actual_numel = weight_tensor.numel()
-            expected_numel = param.numel()
-            if actual_numel != expected_numel:
-                raise ValueError(
-                    f"Parameter {lora_file} has unexpected parameter count: {actual_numel} (actual) != {expected_numel} (expected)"
-                )
+    # Ensure all parameters are properly initialized
+    for name, param in model.named_parameters():
+        if param.device.type == "meta":
+            print(f"Parameter {name} is still on 'meta' device. Moving to CPU.")
+            param.data = torch.zeros_like(param, device="cpu")  # Allocate real memory
 
-            if weight_tensor.shape != param.shape:
-                raise ValueError(
-                    f"Parameter {lora_file} has unexpected shape: {weight_tensor.shape} (actual) != {param.shape} (expected)"
-                )
+    model = model.to("cpu")
 
-            if weight_tensor.dtype != param.dtype:
-                raise ValueError(
-                    f"Parameter {lora_file} has unexpected dtype: {weight_tensor.dtype} (actual) != {param.dtype} (expected)"
-                )
+    # Upload model to Hugging Face Hub
+    model.push_to_hub(request.upload_peft_model_id, token=request.token, private=request.private)
+    print(f"Upload process for {request.upload_peft_model_id} completed.")
+    
+    return {"status": "success"}
 
-            with torch.no_grad():
-                param.copy_(weight_tensor)
-
-        # Ensure all parameters are properly initialized
-        for name, param in model.named_parameters():
-            if param.device.type == "meta":
-                print(f"Parameter {name} is still on 'meta' device. Moving to CPU.")
-                param.data = torch.zeros_like(param, device="cpu")  # Allocate real memory
-
-        model = model.to("cpu")
-
-        # Upload model to Hugging Face Hub
-        model.push_to_hub(request.upload_peft_model_id, token=request.token, private=request.private)
-        print(f"Upload process for {request.upload_peft_model_id} completed.")
-        
-        return {"status": "success"}
-
-    except Exception as e:
-        error_message = f"Error during model upload: {str(e)}"
-        raise HTTPException(status_code=500, detail=error_message)
-
+    # except Exception as e:
+    #     error_message = f"Error during model upload: {str(e)}"
+    #     raise HTTPException(status_code=500, detail=error_message)
 
 # Shutdown event to stop the model server
 @app.on_event("shutdown")
