@@ -25,7 +25,7 @@ void MPT::create_mpt_model(FFModel &ff,
                            std::string const &weight_file_path,
                            InferenceMode mode,
                            GenerationConfig generationConfig,
-                           bool use_full_precision) {
+                           DataType data_type) {
   MPTConfig mpt_config(model_config_file_path);
   mpt_config.print();
 
@@ -53,7 +53,7 @@ void MPT::create_mpt_model(FFModel &ff,
                                       mpt_config.vocab_size,
                                       mpt_config.hidden_size,
                                       AGGR_MODE_NONE,
-                                      use_full_precision ? DT_FLOAT : DT_HALF,
+                                      data_type,
                                       NULL,
                                       embed_init,
                                       "wte");
@@ -289,7 +289,7 @@ void MPT::create_mpt_model(FFModel &ff,
                          mpt_config.hidden_size,
                          mpt_config.hidden_size / mpt_config.n_heads,
                          ff.config.tensor_parallelism_degree,
-                         use_full_precision);
+                         data_type);
 
   InferenceManager *im = InferenceManager::get_inference_manager();
   im->register_model_weights_loader(&ff, fileloader);

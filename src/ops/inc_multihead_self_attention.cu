@@ -2174,17 +2174,15 @@ void IncMultiHeadSelfAttention::inference_kernel_wrapper(
                                                      output.get_half_ptr(),
                                                      inf_stream,
                                                      peft_stream);
-  }
-  // else if (input.data_type == DT_BFLOAT16) {
-  //   Kernels::IncMultiHeadAttention::inference_kernel(m,
-  //                                                    bc,
-  //                                                    shard_id,
-  //                                                    input.get_bfloat16_ptr(),
-  //                                                    output.get_bfloat16_ptr(),
-  //                                                    inf_stream,
-  //                                                    peft_stream);
-  // }
-  else {
+  } else if (input.data_type == DT_BFLOAT16) {
+    Kernels::IncMultiHeadAttention::inference_kernel(m,
+                                                     bc,
+                                                     shard_id,
+                                                     input.get_bfloat16_ptr(),
+                                                     output.get_bfloat16_ptr(),
+                                                     inf_stream,
+                                                     peft_stream);
+  } else {
     assert(false && "Unspported data type");
   }
 
@@ -2227,9 +2225,19 @@ void IncMultiHeadSelfAttention::peft_bwd_kernel_wrapper(
         input_grad.get_half_ptr(),
         output_grad.get_half_ptr(),
         stream);
+  } else if (input_grad.data_type == DT_BFLOAT16) {
+    assert(!m->offload);
+    Kernels::IncMultiHeadAttention::flash_peft_bwd_kernel(
+        m,
+        bc,
+        shard_id,
+        input_grad.get_bfloat16_ptr(),
+        output_grad.get_bfloat16_ptr(),
+        stream);
   } else {
     assert(false && "Unspported data type");
   }
+
   if (m->profiling) {
     cudaEventRecord(t_end, stream);
     checkCUDA(cudaEventSynchronize(t_end));
@@ -2344,8 +2352,9 @@ IncMultiHeadSelfAttentionMeta::IncMultiHeadSelfAttentionMeta(
     if (num_q_heads > num_kv_heads && (infer_mode == BEAM_SEARCH_MODE)) {
       assert(num_q_heads % num_kv_heads == 0 &&
              "num_q_heads must be divisible by num_kv_heads");
-      assert(attn->data_type == DT_FLOAT ||
-             attn->data_type == DT_HALF && "Unsupported data type");
+      assert((attn->data_type == DT_FLOAT || attn->data_type == DT_HALF ||
+              attn->data_type == DT_BFLOAT16) &&
+             "Unsupported data type");
       gqa_ptr_array_size = num_q_heads * sizeof(void *);
       inf_instance_size += 3 * gqa_ptr_array_size; // fwd
     }
@@ -2624,6 +2633,37 @@ template void Kernels::IncMultiHeadAttention::run_batched_matmul<float>(
     int batch_ratio_c,
     bool bwd);
 
+template void Kernels::IncMultiHeadAttention::run_batched_matmul<__ff_bfloat16>(
+    IncMultiHeadSelfAttentionMeta const *meta,
+    cublasHandle_t handle,
+    cublasOperation_t transa,
+    cublasOperation_t transb,
+    int m,
+    int n,
+    int k,
+    void const *alpha,
+    __ff_bfloat16 const *A,
+    cudaDataType Atype,
+    int lda,
+    long long int strideA,
+    __ff_bfloat16 const *B,
+    cudaDataType Btype,
+    int ldb,
+    long long int strideB,
+    void const *beta,
+    __ff_bfloat16 *C,
+    cudaDataType Ctype,
+    int ldc,
+    long long int strideC,
+    int batchCount,
+    cudaDataType computeType,
+    cublasGemmAlgo_t algo,
+    cudaStream_t stream,
+    int batch_ratio_a,
+    int batch_ratio_b,
+    int batch_ratio_c,
+    bool bwd);
+
 template void Kernels::IncMultiHeadAttention::apply_scaling_and_rotary<float>(
     IncMultiHeadSelfAttentionMeta const *m,
     BatchConfig const *bc,
@@ -2638,6 +2678,13 @@ template void Kernels::IncMultiHeadAttention::apply_scaling_and_rotary<half>(
     half *output_ptr,
     cudaStream_t inf_stream);
 
+template void Kernels::IncMultiHeadAttention::apply_scaling_and_rotary<__ff_bfloat16>(
+    IncMultiHeadSelfAttentionMeta const *m,
+    BatchConfig const *bc,
+    int shard_id,
+    __ff_bfloat16 *output_ptr,
+    cudaStream_t inf_stream);
+
 template __global__ void
     Kernels::IncMultiHeadAttention::apply_position_bias_qkprd<float>(
         float *input_ptr,
@@ -2650,6 +2697,15 @@ template __global__ void
 template __global__ void
     Kernels::IncMultiHeadAttention::apply_position_bias_qkprd<half>(
         half *input_ptr,
+        int num_tokens,
+        int num_total_tokens,
+        int num_heads,
+        int global_num_q_heads,
+        int shard_id);
+
+template __global__ void
+    Kernels::IncMultiHeadAttention::apply_position_bias_qkprd<__ff_bfloat16>(
+        __ff_bfloat16 *input_ptr,
         int num_tokens,
         int num_total_tokens,
         int num_heads,

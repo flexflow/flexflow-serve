@@ -71,6 +71,9 @@ void forward_kernel_wrapper(SoftmaxMeta const *m,
   } else if (m->output_type[0] == DT_HALF) {
     Internal::forward_kernel(
         m, input.get_half_ptr(), output.get_half_ptr(), stream);
+  } else if (m->output_type[0] == DT_BFLOAT16) {
+    Internal::forward_kernel(
+        m, input.get_bfloat16_ptr(), output.get_bfloat16_ptr(), stream);
   } else {
     assert(false && "Unsupported data type");
   }
@@ -112,6 +115,12 @@ void backward_kernel_wrapper(SoftmaxMeta const *m,
     Internal::backward_kernel(m,
                               input_grad.get_half_ptr(),
                               output_grad.get_half_ptr(),
+                              output_grad.domain.get_volume(),
+                              stream);
+  } else if (m->output_type[0] == DT_BFLOAT16) {
+    Internal::backward_kernel(m,
+                              input_grad.get_bfloat16_ptr(),
+                              output_grad.get_bfloat16_ptr(),
                               output_grad.domain.get_volume(),
                               stream);
   } else {
@@ -168,6 +177,17 @@ void inference_kernel_wrapper(SoftmaxMeta *m,
       Internal::store_peft_activations(
           m, bc, num_classes, output.get_half_ptr(), stream);
     }
+  } else if (m->output_type[0] == DT_BFLOAT16) {
+    Internal::inference_kernel(m,
+                               bc,
+                               input.get_bfloat16_ptr(),
+                               output.get_bfloat16_ptr(),
+                               num_classes,
+                               stream);
+    if (is_last_op && bc->num_finetuning_fwd_requests() > 0) {
+      Internal::store_peft_activations(
+          m, bc, num_classes, output.get_bfloat16_ptr(), stream);
+    }
   } else {
     assert(false && "Unsupported data type");
   }
@@ -205,6 +225,9 @@ void peft_bwd_kernel_wrapper(SoftmaxMeta const *m,
   } else if (m->output_type[0] == DT_HALF) {
     Internal::peft_bwd_kernel(
         m, bc, input_grad.get_half_ptr(), num_classes, stream);
+  } else if (m->output_type[0] == DT_BFLOAT16) {
+    Internal::peft_bwd_kernel(
+        m, bc, input_grad.get_bfloat16_ptr(), num_classes, stream);
   } else {
     assert(false && "Unsupported data type");
   }

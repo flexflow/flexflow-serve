@@ -614,6 +614,9 @@ void TreeIncMultiHeadSelfAttention::inference_kernel_wrapper(
   } else if (input.data_type == DT_FLOAT) {
     Kernels::TreeIncMultiHeadAttention::inference_kernel(
         m, bc, shard_id, input.get_float_ptr(), output.get_float_ptr(), stream);
+  } else if (input.data_type == DT_BFLOAT16) {
+    Kernels::TreeIncMultiHeadAttention::inference_kernel(
+        m, bc, shard_id, input.get_bfloat16_ptr(), output.get_bfloat16_ptr(), stream);
   } else {
     assert(false && "Unspported data type");
   }

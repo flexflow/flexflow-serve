@@ -47,6 +47,9 @@ def main():
     parser.add_argument(
         "--use-full-precision", action="store_true", help="Use full precision"
     )
+    parser.add_argument(
+        "--use-bfloat16-precision", action="store_true", help="Use bfloat16 precision"
+    )
     parser.add_argument("--output-dir", type=str, default="")
     parser.add_argument("--publish-peft-with-id", type=str, default="")
     parser.add_argument(
@@ -63,7 +66,10 @@ def main():
 
     # Set default tensor type depending on argument indicating the float type to use
     if not args.use_full_precision:
-        torch.set_default_dtype(torch.float16)
+        if args.use_bfloat16_precision:
+            torch.set_default_dtype(torch.bfloat16)
+        else:
+            torch.set_default_dtype(torch.float16)
     else:
         torch.set_default_dtype(torch.float32)
 

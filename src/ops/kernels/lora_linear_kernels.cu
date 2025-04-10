@@ -65,21 +65,31 @@ void inference_kernel_wrapper(LoraLinearMeta *m,
     cudaEventRecord(t_start, stream);
   }
   if (m->input_type[0] == DT_FLOAT) {
-    Internal::inference_kernel<float>(m,
-                                      bc,
-                                      input.get_float_ptr(),
-                                      output.get_float_ptr(),
-                                      in_dim,
-                                      out_dim,
-                                      stream);
+    Internal::inference_kernel<float, float>(m,
+                                             bc,
+                                             input.get_float_ptr(),
+                                             output.get_float_ptr(),
+                                             in_dim,
+                                             out_dim,
+                                             stream);
   } else if (m->input_type[0] == DT_HALF) {
-    Internal::inference_kernel<half>(m,
-                                     bc,
-                                     input.get_half_ptr(),
-                                     output.get_half_ptr(),
-                                     in_dim,
-                                     out_dim,
-                                     stream);
+    Internal::inference_kernel<half, half>(m,
+                                           bc,
+                                           input.get_half_ptr(),
+                                           output.get_half_ptr(),
+                                           in_dim,
+                                           out_dim,
+                                           stream);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    Internal::inference_kernel<float, __ff_bfloat16>(m,
+                                                     bc,
+                                                     input.get_bfloat16_ptr(),
+                                                     output.get_bfloat16_ptr(),
+                                                     in_dim,
+                                                     out_dim,
+                                                     stream);
+  } else {
+    assert(false && "Unsupported data type");
   }
 
   if (m->profiling) {
@@ -117,27 +127,41 @@ void peft_bwd_kernel_wrapper(Context ctx,
   int in_dim = input_grad.domain.hi()[0] - input_grad.domain.lo()[0] + 1;
   int out_dim = output_grad.domain.hi()[0] - output_grad.domain.lo()[0] + 1;
   if (m->input_type[0] == DT_FLOAT) {
-    Internal::peft_bwd_kernel<float>(ctx,
-                                     runtime,
-                                     m,
-                                     bc,
-                                     shard_id,
-                                     input_grad.get_float_ptr(),
-                                     output_grad.get_float_ptr(),
-                                     in_dim,
-                                     out_dim,
-                                     stream);
+    Internal::peft_bwd_kernel<float, float>(ctx,
+                                            runtime,
+                                            m,
+                                            bc,
+                                            shard_id,
+                                            input_grad.get_float_ptr(),
+                                            output_grad.get_float_ptr(),
+                                            in_dim,
+                                            out_dim,
+                                            stream);
   } else if (m->input_type[0] == DT_HALF) {
-    Internal::peft_bwd_kernel<half>(ctx,
-                                    runtime,
-                                    m,
-                                    bc,
-                                    shard_id,
-                                    input_grad.get_half_ptr(),
-                                    output_grad.get_half_ptr(),
-                                    in_dim,
-                                    out_dim,
-                                    stream);
+    Internal::peft_bwd_kernel<half, half>(ctx,
+                                          runtime,
+                                          m,
+                                          bc,
+                                          shard_id,
+                                          input_grad.get_half_ptr(),
+                                          output_grad.get_half_ptr(),
+                                          in_dim,
+                                          out_dim,
+                                          stream);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    Internal::peft_bwd_kernel<float, __ff_bfloat16>(
+        ctx,
+        runtime,
+        m,
+        bc,
+        shard_id,
+        input_grad.get_bfloat16_ptr(),
+        output_grad.get_bfloat16_ptr(),
+        in_dim,
+        out_dim,
+        stream);
+  } else {
+    assert(false && "Unsupported data type");
   }
 
   if (m->profiling) {
@@ -170,11 +194,11 @@ bool lora_applies_to_this_layer(LoraLinearMeta *m,
 
 namespace Internal {
 
-template <typename DT>
+template <typename SCALE_DT, typename DATA_DT>
 void inference_kernel(LoraLinearMeta *m,
                       BatchConfig const *bc,
-                      DT const *input_ptr,
-                      DT *output_ptr,
+                      DATA_DT const *input_ptr,
+                      DATA_DT *output_ptr,
                       int in_dim,
                       int out_dim,
                       ffStream_t stream) {
@@ -185,7 +209,8 @@ void inference_kernel(LoraLinearMeta *m,
   cudaDataType_t lr_actv_type = output_type;
   assert(input_type == output_type);
   cudaDataType_t weight_type = output_type;
-  cudaDataType_t compute_type = output_type;
+  cudaDataType_t compute_type =
+      output_type == CUDA_R_16BF ? CUDA_R_32F : output_type;
 
   int num_peft_requests = 0;
   for (int i = 0; i < bc->max_requests_per_batch(); i++) {
@@ -228,7 +253,7 @@ void inference_kernel(LoraLinearMeta *m,
       assert(m->handle.workSpaceSize >= data_type_size(m->input_type[1]) *
                                             num_peft_tokens * lora_config.rank);
     }
-    DT alpha = 1.0f, beta = 0.0f;
+    SCALE_DT alpha = 1.0f, beta = 0.0f;
     // buffer = weight_first * input
     // [rank, num_peft_tokens] = [in_dim, rank].T * [in_dim, num_peft_tokens]
     checkCUDA(cublasGemmEx(m->handle.blas,
@@ -254,7 +279,8 @@ void inference_kernel(LoraLinearMeta *m,
     // [out_dim, num_peft_tokens] = [rank, out_dim].T * [rank, num_peft_tokens]
     // Note that we use alpha in both places since we do
     // an in-place update for LoraLinear
-    DT scaling_constant = (DT)(lora_config.lora_alpha / lora_config.rank);
+    SCALE_DT scaling_constant =
+        (SCALE_DT)(lora_config.lora_alpha / lora_config.rank);
     checkCUDA(cublasGemmEx(m->handle.blas,
                            CUBLAS_OP_T,
                            CUBLAS_OP_N,
@@ -302,14 +328,14 @@ __global__ void sgd_update(size_t count,
   }
 }
 
-template <typename DT>
+template <typename SCALE_DT, typename DATA_DT>
 void peft_bwd_kernel(Context ctx,
                      Runtime *runtime,
                      LoraLinearMeta *m,
                      BatchConfig const *bc,
                      int shard_id,
-                     DT *input_grad_ptr,
-                     DT const *output_grad_ptr,
+                     DATA_DT *input_grad_ptr,
+                     DATA_DT const *output_grad_ptr,
                      int in_dim,
                      int out_dim,
                      ffStream_t stream) {
@@ -320,7 +346,11 @@ void peft_bwd_kernel(Context ctx,
   assert(input_type == output_type);
   cudaDataType_t weight_type = output_type;
   cudaDataType_t lr_actv_type = output_type;
-  cudaDataType_t compute_type = output_type;
+  cudaDataType_t compute_type =
+      (ff_to_cuda_datatype(m->output_type[0]) == CUDA_R_16BF)
+          ? CUDA_R_32F
+          : ff_to_cuda_datatype(m->output_type[0]);
+  ;
 
   assert(
       bc->peft_bwd_applies_to_this_layer(m->layer_guid.transformer_layer_id));
@@ -343,14 +373,15 @@ void peft_bwd_kernel(Context ctx,
   // int first_token_offset = bc->requestsInfo[i].first_token_offset_in_batch;
   LoraLinearWeight weight = m->peft_memory_manager->get_peft(
       bc->requestsInfo[i].peft_model_id, lora_config);
-  DT scaling_constant = (DT)(lora_config.lora_alpha / lora_config.rank);
+  SCALE_DT scaling_constant =
+      (SCALE_DT)(lora_config.lora_alpha / lora_config.rank);
 
   // Compute LORA_B weight's gradient
   if (bc->requestsInfo[i].optimizer_tasks.compute_gradients) {
-    DT alpha = 1.0f;
-    DT beta = (bc->requestsInfo[i].optimizer_tasks.reset_gradients_to_zero)
-                  ? 0.0f
-                  : 1.0f;
+    SCALE_DT alpha = 1.0f;
+    SCALE_DT beta =
+        (bc->requestsInfo[i].optimizer_tasks.reset_gradients_to_zero) ? 0.0f
+                                                                      : 1.0f;
     // std::cout << "Lora B gradient computation, beta = " << (float) beta <<
     // std::endl;
     if (m->inference_debugging) {
@@ -359,7 +390,7 @@ void peft_bwd_kernel(Context ctx,
           get_peft_dbg_folder(m, shard_id, false) + ".low_rank_activation.pt";
       std::cout << "Save low_rank_activation (" << lora_config.rank << ", "
                 << num_peft_tokens << ") to " << filename << std::endl;
-      auto tensor = createTorchTensorFromCuda<DT>(
+      auto tensor = createTorchTensorFromCuda<DATA_DT>(
           weight.low_rank_activation, {lora_config.rank, num_peft_tokens});
       torch::save(tensor, filename);
     }
@@ -387,7 +418,7 @@ void peft_bwd_kernel(Context ctx,
   // Compute LORA_B input's (and LORA_A output's) gradient inplace in
   // low_rank_activation
   {
-    DT alpha = 1.0f, beta = 0.0f;
+    SCALE_DT alpha = 1.0f, beta = 0.0f;
     checkCUDA(cublasGemmEx(m->handle.peft_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_N,
@@ -411,10 +442,10 @@ void peft_bwd_kernel(Context ctx,
 
   // Compute LORA_A weight's gradient
   if (bc->requestsInfo[i].optimizer_tasks.compute_gradients) {
-    DT alpha = 1.0f;
-    DT beta = (bc->requestsInfo[i].optimizer_tasks.reset_gradients_to_zero)
-                  ? 0.0f
-                  : 1.0f;
+    SCALE_DT alpha = 1.0f;
+    SCALE_DT beta =
+        (bc->requestsInfo[i].optimizer_tasks.reset_gradients_to_zero) ? 0.0f
+                                                                      : 1.0f;
     checkCUDA(cublasGemmEx(m->handle.peft_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_T,
@@ -438,8 +469,8 @@ void peft_bwd_kernel(Context ctx,
   // Compute input gradient
   // NOTE: we use beta=1 for input_grad to accumulate gradients when needed
   if (input_grad_ptr != nullptr) {
-    DT alpha = 1.0f;
-    DT beta = m->reset_input_grads[0] ? 0.0f : 1.0f;
+    SCALE_DT alpha = 1.0f;
+    SCALE_DT beta = m->reset_input_grads[0] ? 0.0f : 1.0f;
     checkCUDA(cublasGemmEx(m->handle.peft_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_N,
@@ -480,16 +511,16 @@ void peft_bwd_kernel(Context ctx,
           sgd_config->weight_decay,
           sgd_config->momentum,
           sgd_config->nesterov,
-          static_cast<DT const *>(weight.w0_grad_ptr),
-          static_cast<DT *>(weight.w0_v_values_ptr),
-          static_cast<DT *>(weight.w0_ptr));
+          static_cast<DATA_DT const *>(weight.w0_grad_ptr),
+          static_cast<DATA_DT *>(weight.w0_v_values_ptr),
+          static_cast<DATA_DT *>(weight.w0_ptr));
       // LoRA_B weight is replicated w tensor parallelism, so we need to sync
       // and sum first
 #ifdef FF_USE_NCCL
       ncclDataType_t nccl_data_type = ff_to_nccl_datatype(m->output_type[0]);
       runtime->concurrent_task_barrier(ctx);
-      checkNCCL(ncclAllReduce(static_cast<DT const *>(weight.w1_grad_ptr),
-                              static_cast<DT *>(weight.w1_grad_ptr),
+      checkNCCL(ncclAllReduce(static_cast<DATA_DT const *>(weight.w1_grad_ptr),
+                              static_cast<DATA_DT *>(weight.w1_grad_ptr),
                               w1_num_elements,
                               nccl_data_type,
                               ncclSum,
@@ -505,9 +536,9 @@ void peft_bwd_kernel(Context ctx,
           sgd_config->weight_decay,
           sgd_config->momentum,
           sgd_config->nesterov,
-          static_cast<DT const *>(weight.w1_grad_ptr),
-          static_cast<DT *>(weight.w1_v_values_ptr),
-          static_cast<DT *>(weight.w1_ptr));
+          static_cast<DATA_DT const *>(weight.w1_grad_ptr),
+          static_cast<DATA_DT *>(weight.w1_v_values_ptr),
+          static_cast<DATA_DT *>(weight.w1_ptr));
     } else if (lora_config.optimizer_config->getType() == "Adam") {
       assert(false && "Adam optimizer type not implemented yet");
     } else {

@@ -249,6 +249,16 @@ void inference_kernel_wrapper(RMSNormMeta *m,
     if (bc->num_finetuning_fwd_requests() > 0) {
       store_peft_activations(m, bc, m->in_dim, input.get_float_ptr(), stream);
     }
+  } else if (output.data_type == DT_BFLOAT16) {
+    inference_kernel(m,
+                     bc,
+                     input.get_bfloat16_ptr(),
+                     weight.get_bfloat16_ptr(),
+                     output.get_bfloat16_ptr(),
+                     stream);
+    if (bc->num_finetuning_fwd_requests() > 0) {
+      store_peft_activations(m, bc, m->in_dim, input.get_bfloat16_ptr(), stream);
+    }
   } else {
     assert(false && "Unsupported data type");
   }
@@ -379,6 +389,13 @@ void peft_bwd_kernel_wrapper(RMSNormMeta const *m,
                     output_grad.get_float_ptr(),
                     input_grad.get_float_ptr(),
                     weight.get_float_ptr(),
+                    stream);
+  } else if (output_grad.data_type == DT_BFLOAT16) {
+    peft_bwd_kernel(m,
+                    bc,
+                    output_grad.get_bfloat16_ptr(),
+                    input_grad.get_bfloat16_ptr(),
+                    weight.get_bfloat16_ptr(),
                     stream);
   } else {
     assert(false && "Unsupported data type");

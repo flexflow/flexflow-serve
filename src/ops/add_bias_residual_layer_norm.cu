@@ -237,6 +237,13 @@ void AddBiasResidualLayerNorm::inference_kernel_wrapper(
           data_type_size(m->input_type[0]) * num_peft_tokens * in_dim,
           cudaMemcpyDeviceToDevice,
           stream));
+    } else if (m->input_type[0] == DT_BFLOAT16) {
+      checkCUDA(cudaMemcpyAsync(
+          m->input_activation,
+          added_output.get_bfloat16_ptr() + first_token_offset * in_dim,
+          data_type_size(m->input_type[0]) * num_peft_tokens * in_dim,
+          cudaMemcpyDeviceToDevice,
+          stream));
     } else {
       assert(false && "unsupport datatype in layernorm");
     }
@@ -270,6 +277,19 @@ void AddBiasResidualLayerNorm::inference_kernel_wrapper(
         output.get_half_ptr(),
         m->elementwise_affine ? gamma.get_half_ptr() : nullptr,
         (m->elementwise_affine && m->use_bias) ? beta.get_half_ptr() : nullptr,
+        stream);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    AddBiasResidualLayerNorm::inference_kernel<__ff_bfloat16>(
+        m,
+        attn_bias_dim,
+        residual_volume,
+        input.get_bfloat16_ptr(),
+        attn_bias.get_bfloat16_ptr(),
+        residual.get_bfloat16_ptr(),
+        added_output.get_bfloat16_ptr(),
+        output.get_bfloat16_ptr(),
+        m->elementwise_affine ? gamma.get_bfloat16_ptr() : nullptr,
+        (m->elementwise_affine && m->use_bias) ? beta.get_bfloat16_ptr() : nullptr,
         stream);
   } else {
     assert(false && "unsupport datatype in layernorm");
@@ -719,6 +739,19 @@ void AddBiasResidualLayerNorm::backward_kernel_wrapper(
         (m->elementwise_affine && m->use_bias) ? beta_grad.get_half_ptr()
                                                : nullptr,
         stream);
+  } else if (m->output_type[0] == DT_BFLOAT16){
+    AddBiasResidualLayerNorm::backward_kernel(
+        m,
+        output_grad.get_bfloat16_ptr(),
+        added_output.get_bfloat16_ptr(),
+        input_grad.get_bfloat16_ptr(),
+        residual_grad.get_bfloat16_ptr(),
+        attn_bias_grad.get_bfloat16_ptr(),
+        m->elementwise_affine ? gamma.get_bfloat16_ptr() : nullptr,
+        m->elementwise_affine ? gamma_grad.get_bfloat16_ptr() : nullptr,
+        (m->elementwise_affine && m->use_bias) ? beta_grad.get_bfloat16_ptr()
+                                               : nullptr,
+        stream);
   } else {
     assert(false && "Unsupported data type");
   }
@@ -792,6 +825,13 @@ void AddBiasResidualLayerNorm::peft_bwd_kernel_wrapper(
                     input_grad.get_half_ptr(),
                     residual_grad.get_half_ptr(),
                     m->elementwise_affine ? gamma.get_half_ptr() : nullptr,
+                    stream);
+  } else if (m->output_type[0] == DT_BFLOAT16) {
+    peft_bwd_kernel(m,
+                    output_grad.get_bfloat16_ptr(),
+                    input_grad.get_bfloat16_ptr(),
+                    residual_grad.get_bfloat16_ptr(),
+                    m->elementwise_affine ? gamma.get_bfloat16_ptr() : nullptr,
                     stream);
   } else {
     assert(false && "Unsupported data type");

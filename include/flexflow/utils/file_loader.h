@@ -32,7 +32,7 @@ public:
                  size_t _hidden_dim,
                  size_t _qkv_inner_dim,
                  int _tensor_parallelism_degree,
-                 bool _use_full_precision);
+                 DataType _data_type);
 
   BatchConfig::TokenId *generate_requests(int num, int length);
 
@@ -44,7 +44,7 @@ public:
                                  size_t num_replicas,
                                  DT *weight,
                                  Domain weight_domain);
-
+                                 
   void load_quantization_weight(FFModel *ff,
                                 Layer *l,
                                 int weight_idx,
@@ -64,7 +64,7 @@ public:
                              Legion::Runtime *runtime);
 
   void load_positions(FFModel *ff,
-                      Tensor pt,
+                      Tensor pt,  
                       ParallelTensor position_pt,
                       int max_seq_length,
                       int offset);
@@ -74,7 +74,7 @@ private:
   size_t hidden_dim, qkv_inner_dim;
   std::string prompts_filepath;
   std::string weights_folder;
-  bool use_full_precision;
+  DataType data_type;
 };
 
 struct WeightLoadTaskArgs {

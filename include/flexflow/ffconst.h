@@ -36,7 +36,7 @@ enum DataType {
   DT_INT4 = 46,
   DT_INT8 = 47,
   DT_NONE = 49,
-  DT_BFLOAT16 = 50, // placeholder for bfloat16
+  DT_BFLOAT16 = 50,
 };
 
 enum LossType {
@@ -287,4 +287,11 @@ enum {
   PEFT_MODEL_ID_FIRST_VALID = 6000000,
   PEFT_MODEL_ID_LAST_VALID = 6999999
 };
+
+enum InferencePrecision {
+  INFERENCE_FLOAT = 800,
+  INFERENCE_HALF = 801,
+  INFERENCE_BFLOAT16 = 802,
+};
+
 #endif // _FLEXFLOW_CONST_H_

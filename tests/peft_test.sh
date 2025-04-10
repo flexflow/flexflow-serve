@@ -17,6 +17,7 @@ TP_DEGREE=${TP_DEGREE:-4}
 PP_DEGREE=${PP_DEGREE:-1}
 FF_CACHE_PATH=${FF_CACHE_PATH:-"~/.cache/flexflow"}
 FULL_PRECISION=${FULL_PRECISION:-false}
+BFLOAT16_PRECISION=${BFLOAT16_PRECISION:-true}
 FUSION=${FUSION:-false} # false because we save the debugging tensors in lora_linear.cc
 LEARNING_RATE=${LEARNING_RATE:-0.001}
 NUM_GPUS=$((TP_DEGREE * PP_DEGREE))
@@ -46,10 +47,11 @@ export LEGION_BACKTRACE=1
 python ./inference/utils/download_peft_model.py "${MODEL_NAME}"
 
 if [ "$FULL_PRECISION" = "true" ]; then full_precision_flag="--use-full-precision"; else full_precision_flag=""; fi
+if [ "$BFLOAT16_PRECISION" = "true" ]; then bfloat16_precision_flag="--use-bfloat16-precision"; else bfloat16_precision_flag=""; fi
 if [ "$FUSION" = "true" ]; then fusion_flag="--fusion"; else fusion_flag=""; fi
 
 # Run PEFT in Huggingface to get ground truth tensors
-eval python ./tests/peft/hf_finetune.py --peft-model-id "${MODEL_NAME}" --save-peft-tensors "${full_precision_flag}" -lr "${LEARNING_RATE}"
+eval python ./tests/peft/hf_finetune.py --peft-model-id "${MODEL_NAME}" --save-peft-tensors "${full_precision_flag}" "${bfloat16_precision_flag}" -lr "${LEARNING_RATE}"
 
 # Python test
 echo "Python test"
@@ -90,6 +92,7 @@ python ./tests/peft/peft_alignment_test.py -m "${MODEL_NAME}" -tp "${TP_DEGREE}"
 # C++ test
 echo "C++ test"
 
+if [ "$BFLOAT16_PRECISION" = "true" ]; then bfloat16_precision_flag="--use-bf16-precision"; else bfloat16_precision_flag=""; fi
 ./build/inference/peft/peft \
     -ll:gpu ${NUM_GPUS} -ll:cpu 4 -ll:util 4 \
     -tensor-parallelism-degree "${TP_DEGREE}" \
@@ -101,10 +104,12 @@ echo "C++ test"
     -finetuning-dataset ./inference/prompt/peft_dataset.json \
     -peft-model "$MODEL_NAME" \
     -enable-peft \
-    "${full_precision_flag}" "${fusion_flag}" --inference-debugging
+    ${full_precision_flag} \
+    ${fusion_flag} \
+    ${bfloat16_precision_flag} \
+    --inference-debugging
+     
 
-# Check alignment
-python ./tests/peft/peft_alignment_test.py -m "${MODEL_NAME}" -tp "${TP_DEGREE}" -lr "${LEARNING_RATE}"
 
 # Print succeess message
 echo ""

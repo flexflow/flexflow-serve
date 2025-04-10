@@ -66,23 +66,30 @@ void inference_kernel_wrapper(LoraLinearMeta *m,
     checkCUDA(hipEventRecord(t_start, stream));
   }
   if (m->input_type[0] == DT_FLOAT) {
-    Internal::inference_kernel<float>(m,
-                                      bc,
-                                      input.get_float_ptr(),
-                                      output.get_float_ptr(),
-                                      in_dim,
-                                      out_dim,
-                                      stream);
+    Internal::inference_kernel<float, float>(m,
+                                             bc,
+                                             input.get_float_ptr(),
+                                             output.get_float_ptr(),
+                                             in_dim,
+                                             out_dim,
+                                             stream);
   } else if (m->input_type[0] == DT_HALF) {
-    Internal::inference_kernel<half>(m,
-                                     bc,
-                                     input.get_half_ptr(),
-                                     output.get_half_ptr(),
-                                     in_dim,
-                                     out_dim,
-                                     stream);
+    Internal::inference_kernel<half, half>(m,
+                                           bc,
+                                           input.get_half_ptr(),
+                                           output.get_half_ptr(),
+                                           in_dim,
+                                           out_dim,
+                                           stream);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    Internal::inference_kernel<float, __ff_bfloat16>(m,
+                                                     bc,
+                                                     input.get_bfloat16_ptr(),
+                                                     output.get_bfloat16_ptr(),
+                                                     in_dim,
+                                                     out_dim,
+                                                     stream);
   }
-
   if (m->profiling) {
     checkCUDA(hipEventRecord(t_end, stream));
     checkCUDA(hipEventSynchronize(t_end));

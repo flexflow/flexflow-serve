@@ -171,7 +171,9 @@ class Node():
 
     @staticmethod
     def torch_to_ff_dtype(torch_dtype):
-        if torch_dtype in (torch.float32, torch.float, "float32", "float"):
+        if torch_dtype in (torch.bfloat16, "bfloat16"):
+            return DataType.DT_BFLOAT16
+        elif torch_dtype in (torch.float32, torch.float, "float32", "float"):
             return DataType.DT_FLOAT
         elif torch_dtype in (torch.float64, torch.double, "float64", "double"):
             return DataType.DT_DOUBLE
@@ -184,7 +186,9 @@ class Node():
 
     @staticmethod
     def numpy_to_ff_dtype(numpy_dtype):
-        if numpy_dtype in (np.float32, np.float, "float32", "float"):
+        if numpy_dtype in (np.bfloat16, "bfloat16"):
+            return DataType.DT_BFLOAT16
+        elif numpy_dtype in (np.float32, np.float, "float32", "float"):
             return DataType.DT_FLOAT
         elif numpy_dtype in (np.float64, np.double, "float64", "double"):
             return DataType.DT_DOUBLE

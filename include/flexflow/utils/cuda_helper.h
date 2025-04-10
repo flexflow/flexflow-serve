@@ -184,6 +184,19 @@ cudnnStatus_t
                                                Legion::Domain domain,
                                                DataType data_type = DT_FLOAT);
 
+template <typename T>
+struct cublasAlphaBetaType {
+  using type = float; // default
+};
+template <>
+struct cublasAlphaBetaType<half> {
+  using type = half;
+};
+template <>
+struct cublasAlphaBetaType<__nv_bfloat16> {
+  using type = __nv_bfloat16;
+};
+
 cudaDataType_t ff_to_cuda_datatype(DataType type);
 cudnnDataType_t ff_to_cudnn_datatype(DataType type);
 #ifdef FF_USE_NCCL

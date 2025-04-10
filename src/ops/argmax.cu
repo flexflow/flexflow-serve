@@ -44,6 +44,10 @@ __device__ __forceinline__ float toFloat(T x) {
     return x;
   } else if constexpr (std::is_same<T, __half>::value) {
     return __half2float(x);
+  } else if constexpr (std::is_same<T, __ff_bfloat16>::value) {
+    return __bfloat162float(x);
+  } else {
+    assert(false && "Unsupported data type");
   }
 }
 
@@ -233,6 +237,18 @@ void ArgMax::forward_kernel_wrapper(ArgMaxMeta const *m,
                                   batch_size,
                                   loss,
                                   stream);
+  } else if (input.data_type == DT_BFLOAT16) {
+    ArgMax::forward_kernel<__ff_bfloat16>(m,
+                                          bc,
+                                          input.get_bfloat16_ptr(),
+                                          indices.get_int32_ptr(),
+                                          m->beam_search ? m->probs : nullptr,
+                                          m->beam_search ? parent.get_int32_ptr()
+                                                         : nullptr,
+                                          length,
+                                          batch_size,
+                                          loss,
+                                          stream);
   } else {
     assert(false && "Unsupported data type");
   }
@@ -263,7 +279,7 @@ ArgMaxMeta::ArgMaxMeta(FFHandler handler,
 
   // size_t d_offsets_size = batch_size;
   size_t prob_size = batch_size;
-  assert(data_type == DT_FLOAT || data_type == DT_HALF);
+  assert(data_type == DT_FLOAT || data_type == DT_HALF || data_type == DT_BFLOAT16);
   size_t total_size = prob_size * sizeof(float);
   gpu_mem_allocator.create_legion_instance(
       reserveInst, total_size, "ArgMaxMeta");

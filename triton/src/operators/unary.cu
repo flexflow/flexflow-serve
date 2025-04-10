@@ -281,6 +281,11 @@ forward_cast(
       gpu_forward_cast<T, float><<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
           (const T*)input_ptr, (float*)output_ptr, num_elements);
       break;
+    } 
+    case DT_BFLOAT16: {
+      gpu_forward_cast<T, __ff_bfloat16><<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
+          (const T*)input_ptr, (__ff_bfloat16*)output_ptr, num_elements);
+      break;
     }
     case DT_DOUBLE: {
       gpu_forward_cast<T, double><<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
@@ -347,6 +352,11 @@ __host__
     switch (args->datatype) {
       case DT_HALF: {
         forward_cast<__half>(
+            args->casttype, stream, input_ptr, output_ptr, num_elements);
+        break;
+      } 
+      case DT_BFLOAT16: {
+        forward_cast<__ff_bfloat16>(
             args->casttype, stream, input_ptr, output_ptr, num_elements);
         break;
       }
@@ -436,6 +446,13 @@ __host__
         unary_forward_half<<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
             (const __half*)input_ptr, (__half*)output_ptr, alpha, beta,
             args->scalar.half_value, args->op_type, num_elements);
+        break;
+      } 
+      case DT_BFLOAT16: {
+        __ff_bfloat16 alpha = 1.f, beta = 0.f;
+        unary_forward_bfloat16<<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
+            (const __ff_bfloat16*)input_ptr, (__ff_bfloat16*)output_ptr, alpha, beta,
+            args->scalar.bfloat16_value, args->op_type, num_elements);
         break;
       }
       case DT_FLOAT: {

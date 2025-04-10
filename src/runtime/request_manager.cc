@@ -174,6 +174,8 @@ bool RequestManager::load_request_token_ids(Request &request) {
           << request.dataset.size() << std::endl;
     } else {
       std::ifstream file_handle(request.peft_finetuning_info.dataset_filepath);
+      // print the dataset file path
+      std::cout << "Dataset file path: " << request.peft_finetuning_info.dataset_filepath << std::endl;
       assert(file_handle.good() && "Dataset file does not exist.");
       nlohmann::ordered_json dataset_json =
           nlohmann::ordered_json::parse(file_handle,

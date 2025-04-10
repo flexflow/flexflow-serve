@@ -43,7 +43,9 @@ void parse_input_args(char **argv,
                       FilePaths &paths,
                       std::string &llm_model_name,
                       std::string &peft_model_name,
+                      DataType &data_type,
                       bool &use_full_precision,
+                      bool &use_bf16_precision,
                       bool &verbose,
                       bool &do_sample,
                       bool &enable_peft,
@@ -102,6 +104,12 @@ void parse_input_args(char **argv,
     }
     if (!strcmp(argv[i], "--use-full-precision")) {
       use_full_precision = true;
+      data_type = DT_FLOAT;
+      continue;
+    }
+    if (!strcmp(argv[i], "--use-bf16-precision")) {
+      use_bf16_precision = true;
+      data_type = DT_BFLOAT16;
       continue;
     }
     if (!strcmp(argv[i], "--warmup")) {
@@ -274,7 +282,9 @@ void FlexFlow::top_level_task(Task const *task,
   }
   FilePaths file_paths;
   std::string llm_model_name, peft_model_name;
+  DataType data_type = DT_HALF;
   bool use_full_precision = false;
+  bool use_bf16_precision = false;
   bool verbose = false;
   bool do_sample = false;
   bool enable_peft = false;
@@ -297,7 +307,9 @@ void FlexFlow::top_level_task(Task const *task,
                    file_paths,
                    llm_model_name,
                    peft_model_name,
+                   data_type,
                    use_full_precision,
+                   use_bf16_precision,
                    verbose,
                    do_sample,
                    enable_peft,
@@ -332,11 +344,13 @@ void FlexFlow::top_level_task(Task const *task,
       {file_paths.cache_folder_path, "configs", llm_model_name, "config.json"});
   std::string tokenizer_filepath =
       join_path({file_paths.cache_folder_path, "tokenizers", llm_model_name});
+  // bfloat16 shares same weight file with float32
   std::string weights_filepath =
       join_path({file_paths.cache_folder_path,
                  "weights",
                  llm_model_name,
-                 use_full_precision ? "full-precision" : "half-precision"});
+                 use_full_precision || use_bf16_precision ? "full-precision"
+                                                          : "half-precision"});
   std::ifstream config_file_handle(config_filepath);
   if (!config_file_handle.good()) {
     std::cout << "Model config file " << config_filepath << " not found."
@@ -400,7 +414,7 @@ void FlexFlow::top_level_task(Task const *task,
                                           optim_config,
                                           true /*init_lora_weights*/,
                                           llm_model_name,
-                                          use_full_precision ? "fp32" : "fp16",
+                                          use_full_precision ? "fp32" : (use_bf16_precision ? "bf16" : "fp16"),
                                           rank,
                                           (float)rank,
                                           0.0f,
@@ -428,33 +442,27 @@ void FlexFlow::top_level_task(Task const *task,
                               weights_filepath,
                               INC_DECODING_MODE,
                               generationConfig,
-                              use_full_precision);
+                              data_type);
   } else if (model_type == ModelType::OPT) {
-    OPT::create_opt_model(model,
-                          config_filepath,
-                          weights_filepath,
-                          INC_DECODING_MODE,
-                          use_full_precision);
+    OPT::create_opt_model(
+        model, config_filepath, weights_filepath, INC_DECODING_MODE, data_type);
   } else if (model_type == ModelType::FALCON) {
-    FALCON::create_falcon_model(model,
-                                config_filepath,
-                                weights_filepath,
-                                INC_DECODING_MODE,
-                                use_full_precision);
+    FALCON::create_falcon_model(
+        model, config_filepath, weights_filepath, INC_DECODING_MODE, data_type);
   } else if (model_type == ModelType::STARCODER) {
     STARCODER::create_starcoder_model(model,
                                       config_filepath,
                                       weights_filepath,
                                       INC_DECODING_MODE,
                                       generationConfig,
-                                      use_full_precision);
+                                      data_type);
   } else if (model_type == ModelType::MPT) {
     MPT::create_mpt_model(model,
                           config_filepath,
                           weights_filepath,
                           INC_DECODING_MODE,
                           generationConfig,
-                          use_full_precision);
+                          data_type);
   } else {
     assert(false && "unknow model type");
   }

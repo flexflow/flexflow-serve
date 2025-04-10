@@ -182,6 +182,14 @@ void Sampling::forward_kernel_wrapper(SamplingMeta const *m,
                                     length,
                                     batch_size,
                                     stream);
+  } else if (input.data_type == DT_BFLOAT16) {
+    Sampling::forward_kernel<__ff_bfloat16>(m,
+                                    input.get_bfloat16_ptr(),
+                                    indices.get_int32_ptr(),
+                                    m->top_p,
+                                    length,
+                                    batch_size,
+                                    stream);
   } else {
     assert(false && "Unsupported data type");
   }
@@ -262,6 +270,21 @@ SamplingMeta::SamplingMeta(FFHandler handler,
         temp_storage_bytes,
         input.get_half_ptr(),
         input.get_half_ptr(),
+        idx,
+        idx,
+        total_ele,
+        batch_size,
+        begin_offset,
+        end_offset + 1,
+        0,                             // begin_bit
+        data_type_size(data_type) * 8, // end_bit = sizeof(KeyT) * 8
+        stream));
+  } else if (data_type == DT_BFLOAT16) {
+    checkCUDA(cub::DeviceSegmentedRadixSort::SortPairsDescending(
+        d_temp_storage,
+        temp_storage_bytes,
+        input.get_bfloat16_ptr(),
+        input.get_bfloat16_ptr(),
         idx,
         idx,
         total_ele,

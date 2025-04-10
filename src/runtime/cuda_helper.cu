@@ -12,6 +12,16 @@ using Legion::coord_t;
 using Legion::Domain;
 using Legion::Rect;
 
+#ifdef FF_USE_CUDA
+#include <cuda_bf16.h> // for __nv_bfloat16
+typedef __nv_bfloat16 __ff_bfloat16;
+#elif FF_USE_HIP_CUDA
+#include <cuda_bf16.h>
+typedef hip_bfloat16 __ff_bfloat16;
+#else
+#error "Unknown device, please make sure if CUDA is enabled"
+#endif
+
 namespace FlexFlow {
 
 #ifdef FF_USE_CUDA
@@ -87,6 +97,12 @@ __host__ void relu_backward_kernel(DataType data_type,
     reluBackward<half>
         <<<GET_BLOCKS(output_size), CUDA_NUM_THREADS, 0, stream>>>(
             (half *)output_grad_ptr, (half const *)output_ptr, output_size);
+  } else if (data_type == DT_BFLOAT16) {
+    reluBackward<nv_bfloat16>
+        <<<GET_BLOCKS(output_size), CUDA_NUM_THREADS, 0, stream>>>(
+            (nv_bfloat16 *)output_grad_ptr,
+            (nv_bfloat16 const *)output_ptr,
+            output_size);
   } else if (data_type == DT_FLOAT) {
     reluBackward<float>
         <<<GET_BLOCKS(output_size), CUDA_NUM_THREADS, 0, stream>>>(
@@ -105,7 +121,7 @@ template <typename DT>
 __global__ void
     sigmoid_backward_function(DT *grad_ptr, const DT *output, size_t n) {
   CUDA_KERNEL_LOOP(i, n) {
-    grad_ptr[i] = grad_ptr[i] * output[i] * (1.0f - output[i]);
+    grad_ptr[i] = grad_ptr[i] * output[i] * (static_cast<DT>(1.0f) - output[i]);
   }
 }
 
@@ -118,6 +134,12 @@ __host__ void sigmoid_backward_kernel(DataType data_type,
     sigmoid_backward_function<float>
         <<<GET_BLOCKS(output_size), CUDA_NUM_THREADS, 0, stream>>>(
             (float *)output_grad_ptr, (float const *)output_ptr, output_size);
+  } else if (data_type == DT_BFLOAT16) {
+    sigmoid_backward_function<nv_bfloat16>
+        <<<GET_BLOCKS(output_size), CUDA_NUM_THREADS, 0, stream>>>(
+            (nv_bfloat16 *)output_grad_ptr,
+            (nv_bfloat16 const *)output_ptr,
+            output_size);
   } else if (data_type == DT_DOUBLE) {
     sigmoid_backward_function<double>
         <<<GET_BLOCKS(output_size), CUDA_NUM_THREADS, 0, stream>>>(
@@ -437,6 +459,8 @@ torch::Tensor
     return createTorchTensorFromCuda<float>(tensor.ptr, dims);
   } else if (tensor.data_type == DT_HALF) {
     return createTorchTensorFromCuda<half>(tensor.ptr, dims);
+  } else if (tensor.data_type == DT_BFLOAT16) {
+    return createTorchTensorFromCuda<nv_bfloat16>(tensor.ptr, dims);
   } else if (tensor.data_type == DT_DOUBLE) {
     return createTorchTensorFromCuda<double>(tensor.ptr, dims);
   } else if (tensor.data_type == DT_INT32) {
@@ -611,6 +635,8 @@ cudnnDataType_t ff_to_cudnn_datatype(DataType type) {
       return CUDNN_DATA_DOUBLE;
     case DT_INT32:
       return CUDNN_DATA_INT32;
+    case DT_BFLOAT16:
+      return CUDNN_DATA_BFLOAT16;
     default:
       assert(false && "Unsupported cudnn data type");
   }
@@ -627,6 +653,8 @@ cudaDataType_t ff_to_cuda_datatype(DataType type) {
       return CUDA_R_64F;
     case DT_INT32:
       return CUDA_R_32I;
+    case DT_BFLOAT16:
+      return CUDA_R_16BF;
     default:
       assert(false && "Unspoorted cuda data type");
   }
@@ -640,6 +668,8 @@ ncclDataType_t ff_to_nccl_datatype(DataType type) {
       return ncclHalf;
     case DT_FLOAT:
       return ncclFloat;
+    case DT_BFLOAT16:
+      return ncclBfloat16;
     case DT_DOUBLE:
       return ncclDouble;
     case DT_INT32:
@@ -659,6 +689,8 @@ cudaDataType_t cudnn_to_cuda_datatype(cudnnDataType_t type) {
       return CUDA_R_64F;
     case CUDNN_DATA_INT32:
       return CUDA_R_32I;
+    case CUDNN_DATA_BFLOAT16:
+      return CUDA_R_16BF;
     default:
       assert(false && "Unsupported cuda data type");
   }
@@ -673,6 +705,8 @@ cudnnDataType_t cuda_to_cudnn_datatype(cudaDataType_t type) {
       return CUDNN_DATA_DOUBLE;
     case CUDA_R_32I:
       return CUDNN_DATA_INT32;
+    case CUDA_R_16BF:
+      return CUDNN_DATA_BFLOAT16;
     default:
       assert(false && "Unsupported cudnn data type");
   }
@@ -725,6 +759,9 @@ template __global__ void
     assign_kernel<half>(half *ptr, coord_t size, half value);
 template __global__ void
     assign_kernel<float>(float *ptr, coord_t size, float value);
+template __global__ void assign_kernel<__ff_bfloat16>(__ff_bfloat16 *ptr,
+                                                      coord_t size,
+                                                      __ff_bfloat16 value);
 template __global__ void
     assign_kernel<double>(double *ptr, coord_t size, double value);
 template __global__ void
@@ -736,6 +773,10 @@ template __global__ void
     scale_kernel<half>(half *ptr, coord_t size, half a, half b);
 template __global__ void
     scale_kernel<float>(float *ptr, coord_t size, float a, float b);
+template __global__ void scale_kernel<__ff_bfloat16>(__ff_bfloat16 *ptr,
+                                                     coord_t size,
+                                                     __ff_bfloat16 a,
+                                                     __ff_bfloat16 b);
 template __global__ void
     scale_kernel<double>(double *ptr, coord_t size, double a, double b);
 
@@ -743,6 +784,9 @@ template __global__ void
     add_kernel<half>(half *dst, half const *src, size_t size);
 template __global__ void
     add_kernel<float>(float *dst, float const *src, size_t size);
+template __global__ void add_kernel<__ff_bfloat16>(__ff_bfloat16 *dst,
+                                                   __ff_bfloat16 const *src,
+                                                   size_t size);
 template __global__ void
     add_kernel<double>(double *dst, double const *src, size_t size);
 template __global__ void
@@ -754,6 +798,9 @@ template __global__ void
     copy_kernel<half>(half *dst, half const *src, coord_t size);
 template __global__ void
     copy_kernel<float>(float *dst, float const *src, coord_t size);
+template __global__ void copy_kernel<__ff_bfloat16>(__ff_bfloat16 *dst,
+                                                    __ff_bfloat16 const *src,
+                                                    coord_t size);
 template __global__ void
     copy_kernel<double>(double *dst, double const *src, coord_t size);
 template __global__ void
@@ -839,6 +886,9 @@ template torch::Tensor
     createTorchTensorFromCuda<float>(void *cudaData,
                                      std::vector<int64_t> const &dims);
 template torch::Tensor
+    createTorchTensorFromCuda<__ff_bfloat16>(void *cudaData,
+                                             std::vector<int64_t> const &dims);
+template torch::Tensor
     createTorchTensorFromCuda<half>(void *cudaData,
                                     std::vector<int64_t> const &dims);
 template torch::Tensor
@@ -853,6 +903,9 @@ template torch::Tensor
 template torch::Tensor
     createTorchTensorFromCuda<float>(void const *cudaData,
                                      std::vector<int64_t> const &dims);
+template torch::Tensor
+    createTorchTensorFromCuda<__ff_bfloat16>(void const *cudaData,
+                                             std::vector<int64_t> const &dims);
 template torch::Tensor
     createTorchTensorFromCuda<half>(void const *cudaData,
                                     std::vector<int64_t> const &dims);
@@ -870,6 +923,8 @@ template __host__ float *copy_tensor_dev_to_host<float>(float const *ptr,
                                                         size_t num_elements);
 template __host__ half *copy_tensor_dev_to_host<half>(half const *ptr,
                                                       size_t num_elements);
+template __host__ __ff_bfloat16 *copy_tensor_dev_to_host<__ff_bfloat16>(__ff_bfloat16 const *ptr,
+                                                      size_t num_elements);
 template __host__ double *copy_tensor_dev_to_host<double>(double const *ptr,
                                                           size_t num_elements);
 template __host__ int32_t *
@@ -882,6 +937,9 @@ template __host__ void copy_tensor_dev_to_host<float>(float const *ptr,
 template __host__ void copy_tensor_dev_to_host<half>(half const *ptr,
                                                      half *dst,
                                                      size_t num_elements);
+template __host__ void copy_tensor_dev_to_host<__ff_bfloat16>(__ff_bfloat16 const *ptr,
+                                                               __ff_bfloat16 *dst,
+                                                               size_t num_elements);
 template __host__ void copy_tensor_dev_to_host<double>(double const *ptr,
                                                        double *dst,
                                                        size_t num_elements);
@@ -897,6 +955,9 @@ template __host__ void copy_tensor_host_to_dev<float>(float *dst,
 template __host__ void copy_tensor_host_to_dev<half>(half *dst,
                                                      half const *src,
                                                      size_t num_elements);
+template __host__ void copy_tensor_host_to_dev<__ff_bfloat16>(__ff_bfloat16 *dst,
+                                                               __ff_bfloat16 const *src,
+                                                               size_t num_elements);
 template __host__ void copy_tensor_host_to_dev<double>(double *dst,
                                                        double const *src,
                                                        size_t num_elements);

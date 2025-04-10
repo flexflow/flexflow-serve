@@ -2105,6 +2105,9 @@ void FFModel::map_tensor_with_dim2(ParallelTensor tensor,
     case DT_INT8:
       allocator.allocate_field(sizeof(char), FID_DATA);
       break;
+    case DT_BFLOAT16:
+      allocator.allocate_field(sizeof(__ff_bfloat16), FID_DATA);
+      break;
     default:
       assert(false);
   }

@@ -74,6 +74,10 @@ template void backward_kernel<half>(half const *output_grad_ptr,
 template void backward_kernel<float>(float const *output_grad_ptr,
                                      float *input_grad_ptr,
                                      size_t num_elements);
+template void
+    backward_kernel<__ff_bfloat16>(__ff_bfloat16 const *output_grad_ptr,
+                                   __ff_bfloat16 *input_grad_ptr,
+                                   size_t num_elements);
 template void backward_kernel<double>(double const *output_grad_ptr,
                                       double *input_grad_ptr,
                                       size_t num_elements);

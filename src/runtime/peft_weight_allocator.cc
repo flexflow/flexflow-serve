@@ -268,6 +268,29 @@ void PEFTMemoryManager::load_peft_model(LoraLinearWeight &weight,
                           lora_B_num_shards,
                           shard_id,
                           w1_filepath);
+    } else if (dt == DT_BFLOAT16) {
+      std::cout << "Loading LORA weight " << lora_layername_substr + "_A.weight"
+                << ", num_rows: " << lora_A_num_rows
+                << ", num_cols: " << lora_A_num_cols
+                << ", num_shards: " << lora_A_num_shards
+                << ", shard_id: " << shard_id << std::endl;
+      load_peft_from_file((__ff_bfloat16 *)weight.w0_ptr,
+                          lora_A_num_rows,
+                          lora_A_num_cols,
+                          lora_A_num_shards,
+                          shard_id,
+                          w0_filepath);
+      std::cout << "Loading LORA weight " << lora_layername_substr + "_B.weight"
+                << ", num_rows: " << lora_B_num_rows
+                << ", num_cols: " << lora_B_num_cols
+                << ", num_shards: " << lora_B_num_shards
+                << ", shard_id: " << shard_id << std::endl;
+      load_peft_from_file((__ff_bfloat16 *)weight.w1_ptr,
+                          lora_B_num_rows,
+                          lora_B_num_cols,
+                          lora_B_num_shards,
+                          shard_id,
+                          w1_filepath);
     } else {
       assert(false && "Data type not supported");
     }

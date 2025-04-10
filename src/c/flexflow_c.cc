@@ -2836,7 +2836,7 @@ flexflow_file_data_loader_t
                                      int hidden_dim,
                                      int qkv_inner_dim,
                                      int tensor_parallelism_degree,
-                                     bool use_full_precision) {
+                                     DataType data_type) {
   assert(weight_file_path != nullptr &&
          "Cannot convert nullptr char * to std::string");
   std::string const weight_file_path_str(weight_file_path);
@@ -2847,7 +2847,7 @@ flexflow_file_data_loader_t
                                               hidden_dim,
                                               qkv_inner_dim,
                                               tensor_parallelism_degree,
-                                              use_full_precision);
+                                              data_type);
   DEBUG_PRINT("[FileDataLoader] new %p", handle);
   return FFCObjectWrapper::wrap(handle);
 }

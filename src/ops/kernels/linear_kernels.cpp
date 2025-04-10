@@ -218,6 +218,16 @@ void inference_kernel_wrapper(LinearMeta *m,
       Internal::store_peft_activations<half>(
           m, bc, out_dim, static_cast<half *>(output_ptr), stream);
     }
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    Internal::inference_kernel<float>(m,
+                                      input_ptr,
+                                      output_ptr,
+                                      weight_ptr,
+                                      bias_ptr,
+                                      in_dim,
+                                      out_dim,
+                                      batch_size,
+                                      stream);
   }
 
   if (m->profiling) {
@@ -257,6 +267,15 @@ void peft_bwd_kernel_wrapper(LinearMeta const *m,
                                      stream);
   } else if (m->input_type[0] == DT_HALF) {
     Internal::peft_bwd_kernel<half>(m,
+                                    bc,
+                                    input_grad_ptr,
+                                    output_grad_ptr,
+                                    weight_ptr,
+                                    in_dim,
+                                    out_dim,
+                                    stream);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    Internal::peft_bwd_kernel<float>(m,
                                     bc,
                                     input_grad_ptr,
                                     output_grad_ptr,
@@ -351,7 +370,6 @@ void inference_kernel(LinearMeta const *m,
                          in_dim,
                          in_dim * out_dim);
       }
-
     } else {
       checkCUDA(hipMemcpyAsync(m->weight_ptr,
                                weight_ptr,

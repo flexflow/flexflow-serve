@@ -50,6 +50,16 @@ void forward_kernel_wrapper(EmbeddingMeta const *m,
                                m->aggr,
                                output.domain.get_volume(),
                                stream);
+    } else if (weight.data_type == DT_BFLOAT16) {
+      Internal::forward_kernel(input.get_int32_ptr(),
+                               output.get_bfloat16_ptr(),
+                               weight.get_bfloat16_ptr(),
+                               in_dim,
+                               out_dim,
+                               batch_size,
+                               m->aggr,
+                               output.domain.get_volume(),
+                               stream);
     } else if (weight.data_type == DT_FLOAT) {
       Internal::forward_kernel(input.get_int32_ptr(),
                                output.get_float_ptr(),
@@ -84,10 +94,10 @@ void forward_kernel_wrapper(EmbeddingMeta const *m,
                                m->aggr,
                                output.domain.get_volume(),
                                stream);
-    } else if (weight.data_type == DT_FLOAT) {
+    } else if (weight.data_type == DT_BFLOAT16) {
       Internal::forward_kernel(input.get_int64_ptr(),
-                               output.get_float_ptr(),
-                               weight.get_float_ptr(),
+                               output.get_bfloat16_ptr(),
+                               weight.get_bfloat16_ptr(),
                                in_dim,
                                out_dim,
                                batch_size,

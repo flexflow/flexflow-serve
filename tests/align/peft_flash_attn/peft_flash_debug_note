@@ -31,4 +31,7 @@ set environment LD_LIBRARY_PATH=/root/flexflow-serve/build:/root/flexflow-serve/
 run
 
 # single C++ tests:
+# fp16
 ./build/inference/peft/peft -ll:gpu 2 -ll:cpu 4 -ll:util 4 -tensor-parallelism-degree 2 -ll:fsize 8192 -ll:zsize 12000 --max-requests-per-batch 1 --max-sequence-length 128 --max-tokens-per-batch 128 -llm-model JackFram/llama-160m -finetuning-dataset ./inference/prompt/peft_dataset.json -peft-model goliaro/llama-160m-lora -enable-peft  --inference-debugging
+# bf16
+./build/inference/peft/peft -ll:gpu 2 -ll:cpu 4 -ll:util 4 -tensor-parallelism-degree 2 -ll:fsize 8192 -ll:zsize 12000 --max-requests-per-batch 1 --max-sequence-length 128 --max-tokens-per-batch 128 -llm-model JackFram/llama-160m -finetuning-dataset ./inference/prompt/peft_dataset.json -peft-model goliaro/llama-160m-lora -enable-peft  --inference-debugging --use-bf16-precision

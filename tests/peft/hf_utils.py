@@ -272,14 +272,18 @@ def build_peft_config(args, finetuning=False):
     return peft_config
 
 
-def prepare_model_for_lora_finetuning(model, use_full_precision=False, save_peft_tensors=False):
+def prepare_model_for_lora_finetuning(model, use_bfloat16_precision=False, use_full_precision=False, save_peft_tensors=False):
     # Freeze all layers except the LORA ones. Cast small layers to full precision for stability
     for name, param in model.named_parameters():
         if "lora" not in name:
             param.requires_grad = False  # freeze the model - train adapters later
         else:
             param.requires_grad = True
-            if not use_full_precision:
+            if use_bfloat16_precision:
+                param.data = param.data.to(torch.bfloat16)
+            elif use_full_precision:
+                param.data = param.data.to(torch.float32)
+            else:
                 param.data = param.data.to(torch.float16)  # cast to fp16 for speed
         # if param.ndim == 1:
         #     # cast the small parameters (e.g. layernorm) to fp32 for stability
@@ -294,13 +298,13 @@ def build_peft_model(args, peft_config):
     # Load base model, and apply the PEFT layer
     model = AutoModelForCausalLM.from_pretrained(
         peft_config.base_model_name_or_path,
-        torch_dtype=torch.float32 if args.use_full_precision else torch.float16,
+        torch_dtype=torch.bfloat16 if args.use_bfloat16_precision else torch.float32 if args.use_full_precision else torch.float16,
         device_map="auto",
         attn_implementation="eager",
     )
     model = PeftModel.from_pretrained(model, args.peft_model_id, config=peft_config,
-                                      torch_dtype=torch.float32 if args.use_full_precision else torch.float16,)
-    model = prepare_model_for_lora_finetuning(model, args.use_full_precision, args.save_peft_tensors)
+                                      torch_dtype=torch.bfloat16 if args.use_bfloat16_precision else torch.float32 if args.use_full_precision else torch.float16,)
+    model = prepare_model_for_lora_finetuning(model, args.use_bfloat16_precision, args.use_full_precision, args.save_peft_tensors)
     return model
 
 
@@ -308,7 +312,7 @@ def get_peft_tokenizer(args, peft_config):
     # Get Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         peft_config.base_model_name_or_path,
-        torch_dtype=torch.float32 if args.use_full_precision else torch.float16,
+        torch_dtype=torch.bfloat16 if args.use_bfloat16_precision else torch.float32 if args.use_full_precision else torch.float16,
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = "[PAD]"

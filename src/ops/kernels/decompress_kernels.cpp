@@ -54,10 +54,20 @@ template __global__ void decompress_int4_general_weights<float>(
     char const *input_weight_ptr, float *weight_ptr, int in_dim, int valueSize);
 template __global__ void decompress_int4_general_weights<half>(
     char const *input_weight_ptr, half *weight_ptr, int in_dim, int valueSize);
+template __global__ void
+    decompress_int4_general_weights<__ff_bfloat16>(char const *input_weight_ptr,
+                                                   __ff_bfloat16 *weight_ptr,
+                                                   int in_dim,
+                                                   int valueSize);
 template __global__ void decompress_int8_general_weights<float>(
     char const *input_weight_ptr, float *weight_ptr, int in_dim, int valueSize);
 template __global__ void decompress_int8_general_weights<half>(
     char const *input_weight_ptr, half *weight_ptr, int in_dim, int valueSize);
+template __global__ void
+    decompress_int8_general_weights<__ff_bfloat16>(char const *input_weight_ptr,
+                                                   __ff_bfloat16 *weight_ptr,
+                                                   int in_dim,
+                                                   int valueSize);
 template __global__ void
     decompress_int4_attention_weights<float>(char *input_weight_ptr,
                                              float *weight_ptr,

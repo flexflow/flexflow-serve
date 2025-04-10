@@ -47,6 +47,7 @@ def get_configs():
         "cache_path": os.environ.get("FF_CACHE_PATH", ""),
         "refresh_cache": False,
         "full_precision": False,
+        "bfloat16_precision": False,
         "max_requests_per_batch": 4,
         "max_seq_length": 2048,
         "max_tokens_per_batch": 256,
@@ -67,7 +68,11 @@ def main():
 
     # Create the FlexFlow LLM
     ff_data_type = (
-        ff.DataType.DT_FLOAT if configs.full_precision else ff.DataType.DT_HALF
+        ff.DataType.DT_FLOAT
+        if configs.full_precision
+        else ff.DataType.DT_BFLOAT16
+        if configs.bfloat16_precision
+        else ff.DataType.DT_HALF
     )
     llm = ff.LLM(
         configs.llm_model,

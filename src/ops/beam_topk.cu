@@ -91,8 +91,7 @@ struct StridedData {
 // A heap of Entry<T> that can either work as a min-heap or as a max-heap.
 template <HeapType heapType,
           PreferIndices preferIndices,
-          template <typename>
-          class Data,
+          template <typename> class Data,
           typename T>
 struct IndexedHeap {
   typedef typename Data<T>::Entry Entry;
@@ -199,8 +198,7 @@ struct IndexedHeap {
 
 template <HeapType heapType,
           PreferIndices preferIndices,
-          template <typename>
-          class Data,
+          template <typename> class Data,
           typename T>
 __device__ IndexedHeap<heapType, preferIndices, Data, T>
     make_indexed_heap(typename Data<T>::Entry *data) {
@@ -343,7 +341,11 @@ __device__ void mergeBeamShards(int num_shards,
     int const last_k = k - 1;
     for (int rank = 0; rank < last_k; rank++) {
       Entry<T> const &max_element = max_heap.root();
-      top_k_values[rank] = __half2float(max_element.value);
+      if constexpr (std::is_same<T, __ff_bfloat16>::value) {
+        top_k_values[rank] = __bfloat162float(max_element.value);
+      } else {
+        top_k_values[rank] = __half2float(max_element.value);
+      }
       int shard_index = max_element.index;
       top_k_indices[rank] = entries[shard_index].index;
       top_k_parents[rank] =
@@ -366,7 +368,11 @@ __device__ void mergeBeamShards(int num_shards,
 
     // rank == last_k.
     Entry<T> const &max_element = max_heap.root();
-    top_k_values[last_k] = __half2float(max_element.value);
+    if constexpr (std::is_same<T, __ff_bfloat16>::value) {
+      top_k_values[last_k] = __bfloat162float(max_element.value);
+    } else {
+      top_k_values[last_k] = __half2float(max_element.value);
+    }
     int shard_index = max_element.index;
     top_k_indices[last_k] = entries[shard_index].index;
     top_k_parents[last_k] =
@@ -379,9 +385,9 @@ template <typename T>
 __global__ void
     mergeSubRequestsKernel(int64_t N, T const *X, T const *rstd, T *Y) {
   using T_ACC = T;
-  const int64_t i = blockIdx.x;
+  int64_t const i = blockIdx.x;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
+    int64_t const index = i * N + j;
     Y[index] = static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(rstd[i]);
   }
 }
@@ -707,6 +713,19 @@ void BeamTopK::forward_kernel_wrapper(BeamTopKMeta const *m,
                              length,
                              sorted,
                              stream);
+  } else if (input.data_type == DT_BFLOAT16) {
+    BeamTopK::forward_kernel(m,
+                             bc,
+                             input.get_bfloat16_ptr(),
+                             output_ptr,
+                             indices_ptr,
+                             parent_ptr,
+                             batch_size,
+                             length,
+                             sorted,
+                             stream);
+  } else {
+    assert(false && "Unsupported data type");
   }
 
   if (m->profiling) {
@@ -748,6 +767,9 @@ BeamTopKMeta::BeamTopKMeta(FFHandler handler,
     acc_probs = gpu_mem_allocator.allocate_instance<float>(acc_probs_size);
   } else if (data_type == DT_HALF) {
     acc_probs = gpu_mem_allocator.allocate_instance<half>(acc_probs_size);
+  } else if (data_type == DT_BFLOAT16) {
+    acc_probs =
+        gpu_mem_allocator.allocate_instance<__ff_bfloat16>(acc_probs_size);
   } else {
     assert(false);
   }

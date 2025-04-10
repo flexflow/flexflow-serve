@@ -188,6 +188,16 @@ __host__
             output_ptr));
         break;
       }
+      case DataType::DT_BFLOAT16: {
+        __ff_bfloat16 alpha0 = 1.f,
+               alpha1 = (args->op_type == OperatorType::OP_EW_SUB) ? -1.f : 1.f,
+               beta = 0.f;
+        CHECK_CUDNN(cudnnOpTensor(
+            args->cudnn, args->opDesc, &alpha0, args->input0Tensor, input0_ptr,
+            &alpha1, args->input1Tensor, input1_ptr, &beta, args->outputTensor,
+            output_ptr));
+        break;
+      }
       case DataType::DT_INT8: {
         int8_t alpha0 = 1,
                alpha1 = (args->op_type == OperatorType::OP_EW_SUB) ? -1 : 1,
@@ -231,6 +241,13 @@ __host__
         binary_forward_float<<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
             (const float*)input0_ptr, (const float*)input1_ptr,
             (float*)output_ptr, alpha, beta, args->op_type, num_elements);
+        break;
+      }
+      case DataType::DT_BFLOAT16: {
+        __ff_bfloat16 alpha = 1.f, beta = 0.f;
+        binary_forward_bfloat16<<<blocks, THREADS_PER_BLOCK, 0, stream>>>(
+            (const __ff_bfloat16*)input0_ptr, (const __ff_bfloat16*)input1_ptr,
+            (__ff_bfloat16*)output_ptr, alpha, beta, args->op_type, num_elements);
         break;
       }
       case DataType::DT_INT8: {

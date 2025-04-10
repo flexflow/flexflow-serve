@@ -38,6 +38,10 @@ UnaryOperator::UnaryOperator(
       memcpy(&scalar.half_value, scalar_value, sizeof(__half));
       break;
     }
+    case DT_BFLOAT16: {
+      memcpy(&scalar.bfloat16_value, scalar_value, sizeof(__ff_bfloat16));
+      break;
+    }
     case DT_FLOAT: {
       memcpy(&scalar.float_value, scalar_value, sizeof(float));
       break;
@@ -109,6 +113,10 @@ UnaryOperator::Load(Realm::Processor proc)
     }
     case DT_HALF: {
       proc_args.scalar.half_value = scalar.half_value;
+      break;
+    }
+    case DT_BFLOAT16: {
+      proc_args.scalar.bfloat16_value = scalar.bfloat16_value;
       break;
     }
     case DT_FLOAT: {

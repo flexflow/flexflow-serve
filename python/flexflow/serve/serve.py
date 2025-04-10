@@ -90,7 +90,7 @@ class LLM:
 
         :param model_name: The name of the HuggingFace model to use. E.g. 'meta-llama/Llama-2-7b-hf'
         :type model_name: str
-        :param data_type: The data type to use for the tensors (e.g. DataType.DT_FLOAT for full precision, or DataType.DT_HALF for half precision), defaults to DataType.DT_HALF
+        :param data_type: The data type to use for the tensors (e.g. DataType.DT_FLOAT for full precision, or DataType.DT_HALF for half precision, or DataType.DT_BFLOAT16 for bfloat16 precision), defaults to DataType.DT_HALF
         :type data_type: DataType, optional
         :param cache_path: Path to the folder (which will be created if it does not yet exist) to use for the FlexFlow weights/tokenizers cache, defaults to "~/.cache/flexflow"
         :type tokenizer_path: str, optional
@@ -108,7 +108,7 @@ class LLM:
             self.config_class,
         ) = self.supported_models.get_ff_model_type(self.hf_config)
         self.data_type = data_type
-        assert self.data_type == DataType.DT_HALF or self.data_type == DataType.DT_FLOAT
+        assert self.data_type == DataType.DT_HALF or self.data_type == DataType.DT_FLOAT or self.data_type == DataType.DT_BFLOAT16
         self.cache_path = cache_path if len(cache_path) > 0 else "~/.cache/flexflow"
         self.refresh_cache = refresh_cache
         self.output_file = output_file
@@ -248,9 +248,10 @@ class LLM:
                 model_name.lower(),
                 (
                     "full-precision"
-                    if self.data_type == DataType.DT_FLOAT
+                    if self.data_type == DataType.DT_FLOAT or self.data_type == DataType.DT_BFLOAT16
                     else "half-precision"
                 ),
+                # temp: bfloat16 precision share the same folder as full precision
             )
         elif resource_type == CachedResourceType.TOKENIZER:
             return os.path.join(
@@ -323,7 +324,8 @@ class LLM:
                 torch_dtype=(
                     torch.float32
                     if self.data_type == DataType.DT_FLOAT
-                    else torch.float16
+                    else torch.float16 if self.data_type == DataType.DT_HALF
+                    else torch.bfloat16
                 ),
             )
             # Convert the model to FlexFlow format
@@ -393,10 +395,11 @@ class LLM:
         def download_and_convert_peft_model(hf_peft_model_id: str):
             if (
                 self.data_type != DataType.DT_FLOAT
-                and self.data_type != DataType.DT_HALF
+                and self.data_type != DataType.DT_HALF 
+                and self.data_type != DataType.DT_BFLOAT16
             ):
                 raise ValueError(
-                    "data_type must be either DataType.DT_FLOAT or DataType.DT_HALF"
+                    "data_type must be either DataType.DT_FLOAT or DataType.DT_HALF or DataType.DT_BFLOAT16"
                 )
 
             # Save peft config to file
@@ -574,7 +577,7 @@ class LLM:
             model_configs.hidden_size,
             model_configs.hidden_size // model_configs.num_attention_heads,
             self.ffconfig.tensor_parallelism_degree,
-            self.data_type == DataType.DT_FLOAT,
+            self.data_type,
         )
 
         # Register weights file loader

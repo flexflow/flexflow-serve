@@ -1,5 +1,3 @@
-
-
 #include "flexflow/ops/kernels/decompress_kernels.h"
 #include "flexflow/utils/cuda_helper.h"
 #include "flexflow/utils/peft_weight_allocator.h"
@@ -28,8 +26,10 @@ void lora_init_kernel(LoraLinearWeight const &weight,
   std::vector<DT> lora_a_random_init(w0_num_elements);
   for (auto &num : lora_a_random_init) {
     float num_float = dis_lora_a(gen);
-    if (std::is_same<DT, half>::value) {
+    if constexpr (std::is_same<DT, half>::value) {
       num = __float2half(num_float);
+    } else if constexpr (std::is_same<DT, __ff_bfloat16>::value) {
+      num = __float2bfloat16(num_float);
     } else {
       num = num_float;
     }
@@ -72,6 +72,9 @@ void init_peft_weight_wrapper(LoraLinearWeight const &weight,
     lora_init_kernel<float>(weight, in_dim, out_dim, rank, seed, stream);
   } else if (dt == DT_HALF) {
     lora_init_kernel<half>(weight, in_dim, out_dim, rank, seed, stream);
+  } else if (dt == DT_BFLOAT16) {
+    lora_init_kernel<__ff_bfloat16>(
+        weight, in_dim, out_dim, rank, seed, stream);
   } else {
     assert(false && "Unsupported data type");
   }

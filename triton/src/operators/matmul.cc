@@ -806,8 +806,9 @@ MatMul::forward_gpu(
       const uint8_t* in2_local = in2_ptr + in2_offset;
       uint8_t* out_local = out_ptr + out_offset;
       switch (args->out_datatype) {
-        // Use 32-bit intermediate for 16-bit float
+        // Use 32-bit intermediate for 16-bit float and bfloat16
         case DT_HALF:
+        case DT_BFLOAT16:
         case DT_FLOAT: {
           float alpha = 1.f, beta = 0.f;
           CHECK_CUBLAS(cublasGemmStridedBatchedEx(
@@ -853,8 +854,9 @@ MatMul::forward_gpu(
     // This is the easy case where there are no broadcasts
     // so we can do the full batch matmul in a single call
     switch (args->out_datatype) {
-      // Use 32-bit intermediate for 16-bit float
+      // Use 32-bit intermediate for 16-bit float and bfloat16
       case DT_HALF:
+      case DT_BFLOAT16:
       case DT_FLOAT: {
         float alpha = 1.f, beta = 0.f;
         CHECK_CUBLAS(cublasGemmStridedBatchedEx(

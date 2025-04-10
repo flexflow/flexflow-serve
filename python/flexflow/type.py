@@ -36,6 +36,7 @@ class DataType(Enum):
     DT_FLOAT = 44
     DT_DOUBLE = 45
     DT_NONE = 49
+    DT_BFLOAT16 = 50
 
 
 class LossType(Enum):
@@ -203,6 +204,8 @@ def data_type_size(value: DataType):
     elif value == DataType.DT_INT64:
         return 8
     elif value == DataType.DT_HALF:
+        return 2
+    elif value == DataType.DT_BFLOAT16:
         return 2
     elif value == DataType.DT_FLOAT:
         return 4

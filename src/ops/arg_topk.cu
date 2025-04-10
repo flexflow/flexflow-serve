@@ -87,8 +87,7 @@ struct StridedData {
 // A heap of Entry<T> that can either work as a min-heap or as a max-heap.
 template <HeapType heapType,
           PreferIndices preferIndices,
-          template <typename>
-          class Data,
+          template <typename> class Data,
           typename T>
 struct IndexedHeap {
   typedef typename Data<T>::Entry Entry;
@@ -195,8 +194,7 @@ struct IndexedHeap {
 
 template <HeapType heapType,
           PreferIndices preferIndices,
-          template <typename>
-          class Data,
+          template <typename> class Data,
           typename T>
 __device__ IndexedHeap<heapType, preferIndices, Data, T>
     make_indexed_heap(typename Data<T>::Entry *data) {
@@ -511,6 +509,18 @@ void ArgTopK::forward_kernel_wrapper(ArgTopKMeta const *m,
   } else if (input.data_type == DT_FLOAT) {
     ArgTopK::forward_kernel(m,
                             input.get_float_ptr(),
+                            m->speculative_decoding ? probs.get_float_ptr()
+                                                    : nullptr,
+                            indices.get_int32_ptr(),
+                            batch_size,
+                            length,
+                            k,
+                            m->sorted,
+                            m->speculative_decoding ? bc : nullptr,
+                            stream);
+  } else if (input.data_type == DT_BFLOAT16) {
+    ArgTopK::forward_kernel(m,
+                            input.get_bfloat16_ptr(),
                             m->speculative_decoding ? probs.get_float_ptr()
                                                     : nullptr,
                             indices.get_int32_ptr(),

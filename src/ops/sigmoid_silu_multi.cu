@@ -154,6 +154,19 @@ void SigmoidSiluMulti::inference_kernel_wrapper(
           input_tensor_size,
           cudaMemcpyDeviceToDevice,
           stream));
+    } else if (m->input_type[0] == DT_BFLOAT16) {
+      checkCUDA(
+          cudaMemcpyAsync(m->input_activation,
+                          input1.get_bfloat16_ptr() + first_token_offset * in_dim,
+                          input_tensor_size,
+                          cudaMemcpyDeviceToDevice,
+                          stream));
+      checkCUDA(cudaMemcpyAsync(
+          (void *)((char *)m->input_activation + input_tensor_size),
+          input2.get_bfloat16_ptr() + first_token_offset * in_dim,
+          input_tensor_size,
+          cudaMemcpyDeviceToDevice,
+          stream));
     } else {
       assert(false && "unsupport datatype in layernorm");
     }
@@ -175,6 +188,14 @@ void SigmoidSiluMulti::inference_kernel_wrapper(
                                        input1.get_half_ptr(),
                                        input2.get_half_ptr(),
                                        output.get_half_ptr());
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    SigmoidSiluMultiKernel<<<GET_BLOCKS(num_elements),
+                             min(CUDA_NUM_THREADS, num_elements),
+                             0,
+                             stream>>>(input1.domain.get_volume(),
+                                       input1.get_bfloat16_ptr(),
+                                       input2.get_bfloat16_ptr(),
+                                       output.get_bfloat16_ptr());
   } else {
     assert(false && "unsupport datatype in SigmoidSiluMulti");
   }
@@ -235,6 +256,18 @@ void SigmoidSiluMulti::backward_kernel_wrapper(
                                                input2.get_half_ptr(),
                                                input1_grad.get_half_ptr(),
                                                input2_grad.get_half_ptr(),
+                                               m->reset_input_grads[0],
+                                               m->reset_input_grads[1]);
+  }else if (m->input_type[0] == DT_BFLOAT16) {
+    SigmoidSiluMultiBackwardKernel<<<GET_BLOCKS(num_elements),
+                                     min(CUDA_NUM_THREADS, num_elements),
+                                     0,
+                                     stream>>>(output_grad.domain.get_volume(),
+                                               output_grad.get_bfloat16_ptr(),
+                                               input1.get_bfloat16_ptr(),
+                                               input2.get_bfloat16_ptr(),
+                                               input1_grad.get_bfloat16_ptr(),
+                                               input2_grad.get_bfloat16_ptr(),
                                                m->reset_input_grads[0],
                                                m->reset_input_grads[1]);
   } else {
@@ -305,6 +338,20 @@ void SigmoidSiluMulti::peft_bwd_kernel_wrapper(
             num_peft_tokens * in_dim,
         input1_grad.get_half_ptr(),
         input2_grad.get_half_ptr(),
+        m->reset_input_grads[0],
+        m->reset_input_grads[1]);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    SigmoidSiluMultiBackwardKernel<<<GET_BLOCKS(num_elements),
+                                     min(CUDA_NUM_THREADS, num_elements),
+                                     0,
+                                     stream>>>(
+        num_elements,
+        output_grad.get_bfloat16_ptr(),
+        static_cast<__ff_bfloat16 const *>(m->input_activation),
+        static_cast<__ff_bfloat16 const *>(m->input_activation) +
+            num_peft_tokens * in_dim,
+        input1_grad.get_bfloat16_ptr(),
+        input2_grad.get_bfloat16_ptr(),
         m->reset_input_grads[0],
         m->reset_input_grads[1]);
   } else {

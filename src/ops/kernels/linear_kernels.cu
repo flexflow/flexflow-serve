@@ -83,6 +83,14 @@ LinearMeta::LinearMeta(FFHandler handler,
                           min(CUDA_NUM_THREADS, parallelism),
                           0,
                           stream>>>((half *)one_ptr, batch_size);
+    } else if (data_type == DT_BFLOAT16) {
+      Kernels::Linear::Internal::
+          build_one_ptr<<<GET_BLOCKS(parallelism),
+                          min(CUDA_NUM_THREADS, parallelism),
+                          0,
+                          stream>>>((__ff_bfloat16 *)one_ptr, batch_size);
+    } else {
+      assert(false && "Unsupported data type");
     }
   } else {
     one_ptr = nullptr;
@@ -219,6 +227,23 @@ void inference_kernel_wrapper(LinearMeta *m,
       Internal::store_peft_activations<half>(
           m, bc, out_dim, static_cast<half *>(output_ptr), stream);
     }
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    Internal::inference_kernel<float>(m,
+                                      input_ptr,
+                                      output_ptr,
+                                      weight_ptr,
+                                      bias_ptr,
+                                      in_dim,
+                                      out_dim,
+                                      batch_size,
+                                      stream);
+    if ((m->activation == AC_MODE_RELU || m->activation == AC_MODE_SIGMOID) &&
+        bc->num_finetuning_fwd_requests() > 0) {
+      Internal::store_peft_activations<__ff_bfloat16>(
+          m, bc, out_dim, static_cast<__ff_bfloat16 *>(output_ptr), stream);
+    }
+  } else {
+    assert(false && "Unsupported data type");
   }
 
   if (m->profiling) {
@@ -265,6 +290,18 @@ void peft_bwd_kernel_wrapper(LinearMeta const *m,
                                     in_dim,
                                     out_dim,
                                     stream);
+  } else if (m->input_type[0] == DT_BFLOAT16) {
+    // cublas scale type: https://docs.nvidia.com/cuda/cublas/index.html?highlight=cublasGemmEx#cublasgemmex
+    Internal::peft_bwd_kernel<float>(m,
+                                             bc,
+                                             input_grad_ptr,
+                                             output_grad_ptr,
+                                             weight_ptr,
+                                             in_dim,
+                                             out_dim,
+                                             stream);
+  } else {
+    assert(false && "Unsupported data type");
   }
 
   if (m->profiling) {
@@ -347,7 +384,6 @@ void inference_kernel(LinearMeta const *m,
                          in_dim,
                          in_dim * out_dim);
       }
-
     } else {
       cudaMemcpyAsync(m->weight_ptr,
                       weight_ptr,
@@ -358,6 +394,8 @@ void inference_kernel(LinearMeta const *m,
   }
   checkCUDA(cublasSetStream(m->handle.blas, stream));
   checkCUDNN(cudnnSetStream(m->handle.dnn, stream));
+  // CUDA_R_32F for bf16:
+  // https://docs.nvidia.com/cuda/cublas/index.html?highlight=cublasGemmEx#cublasgemmex
   DT alpha = 1.0f, beta = 0.0f;
   cudaDataType_t input_type = ff_to_cuda_datatype(m->input_type[0]);
   cudaDataType_t weight_type = m->offload
@@ -365,7 +403,8 @@ void inference_kernel(LinearMeta const *m,
                                    : ff_to_cuda_datatype(m->weight_type[0]);
   cudaDataType_t output_type = ff_to_cuda_datatype(m->output_type[0]);
   assert(input_type == weight_type && weight_type == output_type);
-  cudaDataType_t compute_type = output_type;
+  cudaDataType_t compute_type =
+      output_type == CUDA_R_16BF ? CUDA_R_32F : output_type;
   checkCUDA(cublasGemmEx(m->handle.blas,
                          CUBLAS_OP_T,
                          CUBLAS_OP_N,
@@ -492,7 +531,7 @@ void peft_bwd_kernel(LinearMeta const *m,
 
   input_grad_ptr = static_cast<DT *>(input_grad_ptr);
   output_grad_ptr = static_cast<DT *>(output_grad_ptr);
-  cudaDataType_t compute_type = output_type;
+  cudaDataType_t compute_type = output_type == CUDA_R_16BF ? CUDA_R_32F : output_type;
   int output_size = out_dim * num_peft_tokens;
   if (m->activation == AC_MODE_RELU) {
     relu_backward_kernel(m->output_type[0],

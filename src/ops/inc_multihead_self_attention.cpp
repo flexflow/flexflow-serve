@@ -1390,6 +1390,18 @@ void transposeAdd<float>(float *out,
 }
 
 template <>
+void transposeAdd<__ff_bfloat16>(__ff_bfloat16 *out,
+                                __ff_bfloat16 const *in,
+                                int width,
+                                int height,
+                                float alpha,
+                                float beta,
+                                hipStream_t stream) {
+  transposeAdd_float_kernel<<<4, 1024, 0, stream>>>(
+      out, in, width, height, __float2bfloat16(alpha), __float2bfloat16(beta));
+}
+
+template <>
 void transposeAdd<half>(half *out,
                         half const *in,
                         int width,
@@ -2306,6 +2318,37 @@ template void Kernels::IncMultiHeadAttention::run_batched_matmul<float>(
     int batch_ratio_c,
     bool bwd);
 
+template void Kernels::IncMultiHeadAttention::run_batched_matmul<__ff_bfloat16>(
+    IncMultiHeadSelfAttentionMeta const *meta,
+    hipblasHandle_t handle,
+    hipblasOperation_t transa,
+    hipblasOperation_t transb,
+    int m,
+    int n,
+    int k,
+    void const *alpha,
+    __ff_bfloat16 const *A,
+    hipblasDatatype_t Atype,
+    int lda,
+    long long int strideA,
+    __ff_bfloat16 const *B,
+    hipblasDatatype_t Btype,
+    int ldb,
+    long long int strideB,
+    void const *beta,
+    __ff_bfloat16 *C,
+    hipblasDatatype_t Ctype,
+    int ldc,
+    long long int strideC,
+    int batchCount,
+    hipblasDatatype_t computeType,
+    hipblasGemmAlgo_t algo,
+    hipStream_t stream,
+    int batch_ratio_a,
+    int batch_ratio_b,
+    int batch_ratio_c,
+    bool bwd);
+
 template void
     Kernels::IncMultiHeadAttention::compute_attention_kernel_generation<float>(
         IncMultiHeadSelfAttentionMeta const *m,
@@ -2314,10 +2357,24 @@ template void
         hipStream_t stream);
 
 template void
+    Kernels::IncMultiHeadAttention::compute_attention_kernel_generation<__ff_bfloat16>(
+        IncMultiHeadSelfAttentionMeta const *m,
+        BatchConfig const *bc,
+        __ff_bfloat16 *output_ptr,
+        hipStream_t stream);
+
+template void
     Kernels::IncMultiHeadAttention::compute_attention_kernel_generation<half>(
         IncMultiHeadSelfAttentionMeta const *m,
         BatchConfig const *bc,
         half *output_ptr,
+        hipStream_t stream);
+
+template void
+    Kernels::IncMultiHeadAttention::compute_attention_kernel_generation<__ff_bfloat16>(
+        IncMultiHeadSelfAttentionMeta const *m,
+        BatchConfig const *bc,
+        __ff_bfloat16 *output_ptr,
         hipStream_t stream);
 
 template void Kernels::IncMultiHeadAttention::apply_scaling_and_rotary<float>(
@@ -2332,6 +2389,13 @@ template void Kernels::IncMultiHeadAttention::apply_scaling_and_rotary<half>(
     BatchConfig const *bc,
     int shard_id,
     half *output_ptr,
+    hipStream_t stream);
+
+template void Kernels::IncMultiHeadAttention::apply_scaling_and_rotary<__ff_bfloat16>(
+    IncMultiHeadSelfAttentionMeta const *m,
+    BatchConfig const *bc,
+    int shard_id,
+    __ff_bfloat16 *output_ptr,
     hipStream_t stream);
 
 }; // namespace FlexFlow
