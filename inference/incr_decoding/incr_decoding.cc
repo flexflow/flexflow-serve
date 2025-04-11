@@ -51,6 +51,7 @@ void parse_input_args(char **argv,
                       int &max_tokens_per_batch,
                       int &max_sequence_length,
                       int &num_kv_cache_slots,
+                      bool &ignore_eos,
                       int &max_length,
                       bool &run_warmup) {
   for (int i = 1; i < argc; i++) {
@@ -129,6 +130,10 @@ void parse_input_args(char **argv,
     // max length before stopping if we haven't reached the EOS
     if (!strcmp(argv[i], "--max-length")) {
       max_length = std::stoi(argv[++i]);
+      continue;
+    }
+    if (!strcmp(argv[i], "--ignore-eos")) {
+      ignore_eos = true;
       continue;
     }
     // whether to run warmup
@@ -273,6 +278,7 @@ void FlexFlow::top_level_task(Task const *task,
   int max_length = 128;
   int num_kv_cache_slots = -1;
   bool run_warmup = false;
+  bool ignore_eos = false;
 
   InputArgs const &command_args = HighLevelRuntime::get_input_args();
   char **argv = command_args.argv;
@@ -291,6 +297,7 @@ void FlexFlow::top_level_task(Task const *task,
                    max_tokens_per_batch,
                    max_sequence_length,
                    num_kv_cache_slots,
+                   ignore_eos,
                    max_length,
                    run_warmup);
 
@@ -425,6 +432,11 @@ void FlexFlow::top_level_task(Task const *task,
   std::cout << "----------inference started--------------" << std::endl;
   std::vector<Request> requests =
       load_requests(file_paths.prompt_file_path, qps, max_length);
+  if (ignore_eos) {
+    for (auto &request : requests) {
+      request.ignore_eos = true;
+    }
+  }
 
   std::vector<GenerationResult> result =
       (qps > 0.0f) ? model.generate_online(requests, {})

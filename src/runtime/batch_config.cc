@@ -127,6 +127,28 @@ int BatchConfig::num_inference_requests() const {
          num_finetuning_bwd_requests();
 }
 
+int BatchConfig::num_prefill_requests() const {
+  int num_prefill_reqs = 0;
+  for (int i=0; i<max_requests_per_batch(); i++) {
+    if (request_completed[i] || requestsInfo[i].finetuning_request || !requestsInfo[i].prompt_phase) {
+      continue;
+    }
+    num_prefill_reqs++;
+  }
+  return num_prefill_reqs;
+}
+
+int BatchConfig::num_decoding_requests() const {
+  int num_decoding_reqs = 0;
+  for (int i=0; i<max_requests_per_batch(); i++) {
+    if (request_completed[i] || requestsInfo[i].finetuning_request || requestsInfo[i].prompt_phase) {
+      continue;
+    }
+    num_decoding_reqs++;
+  }
+  return num_decoding_reqs;
+}
+
 int BatchConfig::finetuning_request_index() const {
   assert(max_requests_per_batch() > 0);
   return max_requests_per_batch() - 1;

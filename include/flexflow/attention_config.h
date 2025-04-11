@@ -61,17 +61,22 @@ public:
     num_q_heads_ = 0;
     num_kv_heads_ = 0;
     head_dim_ = 0;
-    q_indptr = nullptr;
-    kv_indptr = nullptr;
-    kv_indices = nullptr;
-    kv_last_page_len = nullptr;
-    qk_indptr = nullptr;
-    custom_mask = nullptr;
-    workspace = nullptr;
+    q_indptr_dec = nullptr;
+    kv_indptr_dec = nullptr;
+    kv_indices_dec = nullptr;
+    kv_last_page_len_dec = nullptr;
+    workspace_dec = nullptr;
+    float_workspace_dec = nullptr;
+    int_workspace_dec = nullptr;
+    q_indptr_pref = nullptr;
+    kv_indptr_pref = nullptr;
+    kv_indices_pref = nullptr;
+    kv_last_page_len_pref = nullptr;
+    workspace_pref = nullptr;
+    float_workspace_pref = nullptr;
+    int_workspace_pref = nullptr;
     workspace_size = 0;
-    float_workspace = nullptr;
     float_workspace_size = 0;
-    int_workspace = nullptr;
     int_workspace_size = 0;
     mem_size_ = 0;
     enabled_ = false;
@@ -80,17 +85,22 @@ public:
     num_q_heads_ = rhs.num_q_heads_;
     num_kv_heads_ = rhs.num_kv_heads_;
     head_dim_ = rhs.head_dim_;
-    q_indptr = rhs.q_indptr;
-    kv_indptr = rhs.kv_indptr;
-    kv_indices = rhs.kv_indices;
-    kv_last_page_len = rhs.kv_last_page_len;
-    qk_indptr = rhs.qk_indptr;
-    custom_mask = rhs.custom_mask;
-    workspace = rhs.workspace;
+    q_indptr_dec = rhs.q_indptr_dec;
+    kv_indptr_dec= rhs.kv_indptr_dec;
+    kv_indices_dec = rhs.kv_indices_dec;
+    kv_last_page_len_dec = rhs.kv_last_page_len_dec;
+    workspace_dec = rhs.workspace_dec;
+    float_workspace_dec = rhs.float_workspace_dec;
+    int_workspace_dec = rhs.int_workspace_dec;
+    q_indptr_pref = rhs.q_indptr_pref;
+    kv_indptr_pref= rhs.kv_indptr_pref;
+    kv_indices_pref = rhs.kv_indices_pref;
+    kv_last_page_len_pref = rhs.kv_last_page_len_pref;
+    workspace_pref = rhs.workspace_pref;
+    float_workspace_pref = rhs.float_workspace_pref;
+    int_workspace_pref = rhs.int_workspace_pref;
     workspace_size = rhs.workspace_size;
-    float_workspace = rhs.float_workspace;
     float_workspace_size = rhs.float_workspace_size;
-    int_workspace = rhs.int_workspace;
     int_workspace_size = rhs.int_workspace_size;
     mem_size_ = rhs.mem_size_;
     enabled_ = rhs.enabled_;
@@ -106,30 +116,33 @@ public:
     size_t max_num_pages = round_up_pages(BatchConfig::max_sequence_length());
     size_t indices_size = std::max(
         (batch_size + 1) * 4 + max_num_pages * batch_size, 1ul * 1024 * 1024);
-    size_t custom_mask_size = 0;
 
     float_workspace_size = 128 * 1024 * 1024; // 128 MB
     int_workspace_size = 8 * 1024 * 1024;     // 8 MB
     workspace_size =
         float_workspace_size + int_workspace_size; // float + int workspace
 
-    mem_size_ = alignTo(sizeof(int32_t) * indices_size +
-                            sizeof(uint8_t) * custom_mask_size + workspace_size,
+    mem_size_ = alignTo(2*(sizeof(int32_t) * indices_size + workspace_size),
                         16);
     return mem_size_;
   }
 
   void assign_address(void *ptr, int size) {
     if (ptr == nullptr) {
-      q_indptr = nullptr;
-      kv_indptr = nullptr;
-      kv_indices = nullptr;
-      kv_last_page_len = nullptr;
-      qk_indptr = nullptr;
-      custom_mask = nullptr;
-      workspace = nullptr;
-      float_workspace = nullptr;
-      int_workspace = nullptr;
+      q_indptr_dec = nullptr;
+      kv_indptr_dec = nullptr;
+      kv_indices_dec = nullptr;
+      kv_last_page_len_dec = nullptr;
+      workspace_dec = nullptr;
+      float_workspace_dec = nullptr;
+      int_workspace_dec = nullptr;
+      q_indptr_pref = nullptr;
+      kv_indptr_pref = nullptr;
+      kv_indices_pref = nullptr;
+      kv_last_page_len_pref = nullptr;
+      workspace_pref = nullptr;
+      float_workspace_pref = nullptr;
+      int_workspace_pref = nullptr;
       return;
     }
     assert(size >= mem_size() &&
@@ -138,19 +151,26 @@ public:
     size_t max_num_pages = round_up_pages(BatchConfig::max_sequence_length());
     size_t indices_size = std::max(
         (batch_size + 1) * 4 + max_num_pages * batch_size, 1ul * 1024 * 1024);
-    size_t custom_mask_size = 0;
 
-    q_indptr = static_cast<int32_t *>(ptr);
-    kv_indptr = q_indptr + batch_size + 1;
-    kv_indices = kv_indptr + batch_size + 1;
-    kv_last_page_len = kv_indices + max_num_pages * batch_size;
-    qk_indptr = kv_last_page_len + batch_size + 1;
-    custom_mask = static_cast<uint8_t *>(ptr) + sizeof(int32_t) * indices_size;
-    workspace = static_cast<void *>(static_cast<uint8_t *>(ptr) +
-                                    sizeof(int32_t) * indices_size +
-                                    sizeof(uint8_t) * custom_mask_size);
-    float_workspace = workspace;
-    int_workspace = static_cast<void *>(static_cast<uint8_t *>(workspace) +
+    q_indptr_dec = static_cast<int32_t *>(ptr);
+    kv_indptr_dec = q_indptr_dec + batch_size + 1;
+    kv_indices_dec = kv_indptr_dec + batch_size + 1;
+    kv_last_page_len_dec = kv_indices_dec + max_num_pages * batch_size;
+    q_indptr_pref = static_cast<int32_t *>(ptr) + indices_size;
+    kv_indptr_pref = q_indptr_pref + batch_size + 1;
+    kv_indices_pref = kv_indptr_pref + batch_size + 1;
+    kv_last_page_len_pref = kv_indices_pref + max_num_pages * batch_size;
+    
+    workspace_dec = static_cast<void *>(static_cast<uint8_t *>(ptr) +
+                                    sizeof(int32_t) * indices_size * 2);
+    float_workspace_dec = workspace_dec;
+    int_workspace_dec = static_cast<void *>(static_cast<uint8_t *>(workspace_dec) +
+                                        float_workspace_size);
+    workspace_pref = static_cast<void *>(static_cast<uint8_t *>(ptr) +
+                                    sizeof(int32_t) * indices_size * 2 +
+                                    workspace_size);
+    float_workspace_pref = workspace_pref;
+    int_workspace_pref = static_cast<void *>(static_cast<uint8_t *>(workspace_pref) +
                                         float_workspace_size);
   }
 
@@ -184,19 +204,26 @@ public:
   uint32_t num_kv_heads_;
   uint32_t head_dim_;
 
-  int32_t *q_indptr;
-  int32_t *kv_indptr;
-  int32_t *kv_indices;
-  int32_t *kv_last_page_len;
-  int32_t *qk_indptr;
-  uint8_t *custom_mask;
-  void *workspace;
+  int32_t *q_indptr_dec;
+  int32_t *kv_indptr_dec;
+  int32_t *kv_indices_dec;
+  int32_t *kv_last_page_len_dec;
+  uint8_t *custom_mask_dec;
+  void *workspace_dec;
+  void *float_workspace_dec;
+  void *int_workspace_dec;
+  int32_t *q_indptr_pref;
+  int32_t *kv_indptr_pref;
+  int32_t *kv_indices_pref;
+  int32_t *kv_last_page_len_pref;
+  uint8_t *custom_mask_pref;
+  void *workspace_pref;
+  void *float_workspace_pref;
+  void *int_workspace_pref;
+  
   size_t workspace_size;
-  void *float_workspace;
   size_t float_workspace_size;
-  void *int_workspace;
   size_t int_workspace_size;
-
   size_t mem_size_;
 
   // batchsize -> handler

@@ -232,7 +232,7 @@ void load_attention_weights_to_dense_v2(DT *ptr,
     weight_filenames.push_back(o_file);
   }
 
-  assert(head_dim == hidden_dim / num_q_heads);
+  // assert(head_dim == hidden_dim / num_q_heads);
 
   int total_num_heads = num_q_heads + 2 * num_kv_heads;
   int total_heads_per_shard = total_num_heads / tensor_parallelism_degree;

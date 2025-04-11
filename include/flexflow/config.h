@@ -90,9 +90,11 @@ struct FFHandler {
 #if defined(FF_USE_CUDA) || defined(FF_USE_HIP_CUDA)
   cudnnHandle_t dnn, peft_dnn;
   cublasHandle_t blas, peft_blas;
+  cudaStream_t extra_stream1, extra_stream2;
 #else
   miopenHandle_t dnn, peft_dnn;
   hipblasHandle_t blas, peft_blas;
+  hipStream_t extra_stream1, extra_stream2;
 #endif
   void *workSpace;
   size_t workSpaceSize;

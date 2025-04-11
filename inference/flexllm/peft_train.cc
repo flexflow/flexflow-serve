@@ -53,7 +53,10 @@ void parse_input_args(char **argv,
                       int &max_tokens_per_batch,
                       int &max_sequence_length,
                       int &num_kv_cache_slots,
+                      int &max_finetuning_samples,
                       int &max_training_epochs,
+                      int &gradient_accumulation_steps,
+                      int &num_logging_steps,
                       int &num_layers_per_finetuning_step,
                       bool &run_warmup) {
   for (int i = 1; i < argc; i++) {
@@ -143,8 +146,20 @@ void parse_input_args(char **argv,
       num_kv_cache_slots = std::stoi(argv[++i]);
       continue;
     }
-    if (!strcmp(argv[i], "--max-training-steps")) {
+    if (!strcmp(argv[i], "--max-finetuning-samples")) {
+      max_finetuning_samples = std::stoi(argv[++i]);
+      continue;
+    }
+    if (!strcmp(argv[i], "--max-training-epochs")) {
       max_training_epochs = std::stoi(argv[++i]);
+      continue;
+    }
+    if (!strcmp(argv[i], "--gradient-accumulation-steps")) {
+      gradient_accumulation_steps = std::stoi(argv[++i]);
+      continue;
+    }
+    if (!strcmp(argv[i], "--num-logging-steps")) {
+      num_logging_steps = std::stoi(argv[++i]);
       continue;
     }
     if (!strcmp(argv[i], "--num-layers-per-finetuning-step")) {
@@ -213,6 +228,7 @@ std::vector<Request> load_trace(nlohmann::ordered_json prompt_json,
     int prompt_length = entry["prompt_length"];
     int response_length = entry["response_length"];
     std::string text = entry["prompt"];
+    double arrival_time_us = entry["arrival_time"].get<double>() * 1000000;
 
     Request inference_req;
     if (benchmarking) {
@@ -222,6 +238,8 @@ std::vector<Request> load_trace(nlohmann::ordered_json prompt_json,
       inference_req.prompt = text;
     }
     inference_req.max_new_tokens = response_length;
+    inference_req.ignore_eos = true;
+    inference_req.arrival_time_us = arrival_time_us;
     requests.push_back(inference_req);
   }
   return requests;
@@ -283,11 +301,15 @@ void FlexFlow::top_level_task(Task const *task,
   int max_requests_per_batch = 1;
   int max_tokens_per_batch = 128;
   int max_sequence_length = 256;
-  int max_training_epochs = 2;
+  int max_finetuning_samples = -1; // -1: no limit
+  int max_training_epochs = 1;
+  int gradient_accumulation_steps = 8;
+  int num_logging_steps = 10;
   bool enable_peft_finetuning = true;
   int num_layers_per_finetuning_step = -1;
   bool run_warmup = false;
   int num_kv_cache_slots = -1;
+  int rank = 16;
 
   InputArgs const &command_args = HighLevelRuntime::get_input_args();
   char **argv = command_args.argv;
@@ -307,7 +329,10 @@ void FlexFlow::top_level_task(Task const *task,
                    max_tokens_per_batch,
                    max_sequence_length,
                    num_kv_cache_slots,
+                    max_finetuning_samples,
                    max_training_epochs,
+                   gradient_accumulation_steps,
+                    num_logging_steps,
                    num_layers_per_finetuning_step,
                    run_warmup);
   enable_peft_finetuning = file_paths.dataset_file_path.empty() ? false : true;
@@ -391,7 +416,6 @@ void FlexFlow::top_level_task(Task const *task,
          "Invalid LLM model type passed (or no type was passed).");
 
   // load PEFT config
-  int rank = 16;
   LoraOptimizerConfig *optim_config = new LoraSGDOptimizerConfig(0.001f);
   std::vector<std::string> target_modules = {"down_proj"};
   LoraLinearConfig peft_config_finetuning(file_paths.cache_folder_path,
@@ -418,6 +442,7 @@ void FlexFlow::top_level_task(Task const *task,
       model_type, bos_token_id, eos_token_ids, tokenizer_filepath);
   rm->register_output_filepath(file_paths.output_file_path);
   rm->set_enable_peft_finetuning(enable_peft_finetuning);
+  rm->set_max_lora_rank(rank);
 
   FFModel model(ffconfig, ffconfig.cpu_offload);
   model.set_num_kv_cache_pages(
@@ -482,9 +507,10 @@ void FlexFlow::top_level_task(Task const *task,
 
   // Run workload
   {
-    std::vector<Request> requests =
-        load_requests(file_paths.prompt_file_path, 128);
-
+    std::vector<Request> inference_requests;
+    if (!file_paths.prompt_file_path.empty()) {
+      inference_requests = load_requests(file_paths.prompt_file_path, 128);
+    }
     // Add fine-tuning request
     assert(!file_paths.dataset_file_path.empty() &&
            "Dataset file path is required for fine-tuning.");
@@ -495,12 +521,17 @@ void FlexFlow::top_level_task(Task const *task,
     fine_tuning_req.peft_model_id = *peft_model_id_finetuning;
     fine_tuning_req.peft_finetuning_info.dataset_filepath =
         file_paths.dataset_file_path;
+    fine_tuning_req.peft_finetuning_info.max_samples = max_finetuning_samples;
     fine_tuning_req.peft_finetuning_info.max_training_epochs =
         max_training_epochs;
-    requests.push_back(fine_tuning_req);
+    fine_tuning_req.peft_finetuning_info.gradient_accumulation_steps =
+        gradient_accumulation_steps;
+    fine_tuning_req.peft_finetuning_info.num_logging_steps = num_logging_steps;
+    std::vector<Request> finetuning_requests;
+    finetuning_requests.push_back(fine_tuning_req);
 
     std::cout << "----------inference started--------------" << std::endl;
-    std::vector<GenerationResult> result = model.generate(requests);
+    std::vector<GenerationResult> result = model.generate_online(inference_requests, finetuning_requests);
     std::cout << "----------inference finished--------------" << std::endl;
   }
 

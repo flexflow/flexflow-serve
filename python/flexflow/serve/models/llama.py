@@ -52,6 +52,7 @@ class LLAMAConfig:
             if hf_config.num_key_value_heads is None
             else hf_config.num_key_value_heads
         )
+        self.head_dim = hf_config.head_dim if "head_dim" in hf_config.__dict__ else (self.hidden_size // self.num_attention_heads)
 
 
 class FlexFlowLLAMA(FlexFlowModel):
@@ -91,9 +92,6 @@ class FlexFlowLLAMA(FlexFlowModel):
             )
         assert (
             self.llama_config.hidden_size % self.llama_config.num_attention_heads == 0
-        )
-        self.head_dim = (
-            self.llama_config.hidden_size // self.llama_config.num_attention_heads
         )
         self.tot_num_heads = (
             self.llama_config.num_attention_heads
@@ -146,7 +144,7 @@ class FlexFlowLLAMA(FlexFlowModel):
 
             qkv_proj = self.ffmodel.dense(
                 attn_norm,
-                self.head_dim * self.tot_num_heads,
+                self.llama_config.head_dim * self.tot_num_heads,
                 ActiMode.AC_MODE_NONE,
                 False,
                 name=f"layers.{i}.self_attn.qkv_proj",
@@ -155,11 +153,11 @@ class FlexFlowLLAMA(FlexFlowModel):
             if self.mode == InferenceMode.BEAM_SEARCH_MODE:
                 mha = self.ffmodel.spec_inc_multihead_self_attention(
                     qkv_proj,
-                    self.llama_config.hidden_size,
+                    self.llama_config.head_dim*self.llama_config.num_attention_heads,
                     self.llama_config.num_attention_heads,
                     self.llama_config.num_key_value_heads,
-                    self.head_dim,
-                    self.head_dim,
+                    self.llama_config.head_dim,
+                    self.llama_config.head_dim,
                     0.0,  # dropout
                     False,  # add_zero_attn
                     DataType.DT_NONE,  # data_type
@@ -170,11 +168,11 @@ class FlexFlowLLAMA(FlexFlowModel):
             elif self.mode == InferenceMode.TREE_VERIFY_MODE:
                 mha = self.ffmodel.inc_multihead_self_attention_verify(
                     qkv_proj,
-                    self.llama_config.hidden_size,
+                    self.llama_config.head_dim*self.llama_config.num_attention_heads,
                     self.llama_config.num_attention_heads,
                     self.llama_config.num_key_value_heads,
-                    self.head_dim,
-                    self.head_dim,
+                    self.llama_config.head_dim,
+                    self.llama_config.head_dim,
                     0.0,  # dropout
                     False,  # add_zero_attn
                     DataType.DT_NONE,  # data_type
@@ -185,11 +183,11 @@ class FlexFlowLLAMA(FlexFlowModel):
             elif self.mode == InferenceMode.INC_DECODING_MODE:
                 mha = self.ffmodel.inc_multihead_self_attention(
                     qkv_proj,
-                    self.llama_config.hidden_size,
+                    self.llama_config.head_dim*self.llama_config.num_attention_heads,
                     self.llama_config.num_attention_heads,
                     self.llama_config.num_key_value_heads,
-                    self.head_dim,
-                    self.head_dim,
+                    self.llama_config.head_dim,
+                    self.llama_config.head_dim,
                     0.0,  # dropout
                     False,  # add_zero_attn
                     DataType.DT_NONE,  # data_type

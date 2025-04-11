@@ -90,6 +90,7 @@ void RequestManager::load_tokens_task(
 
 void prepare_inference_params_kernel_h(
     BatchConfig const *batch_config,
+    bool decoding,
     std::vector<int32_t> &q_indptr_h,
     std::vector<int32_t> &kv_indptr_h,
     std::vector<int32_t> &kv_page_indices_h,
@@ -109,12 +110,16 @@ void prepare_inference_params_kernel_h(
   q_indptr_h.push_back(0);
   kv_indptr_h.push_back(0);
 
+  int batch_size = 0;
+
   for (int req_idx = 0; req_idx < batch_config->max_requests_per_batch();
        req_idx++) {
     if (batch_config->request_completed[req_idx] ||
-        batch_config->requestsInfo[req_idx].finetuning_request) {
+        batch_config->requestsInfo[req_idx].finetuning_request ||
+        batch_config->requestsInfo[req_idx].prompt_phase == decoding) {
       continue;
     }
+    batch_size++;
 
     // q_indptr: first token offset in batch, plus one token at the end
     // representing the total number of tokens in batch
@@ -145,10 +150,17 @@ void prepare_inference_params_kernel_h(
   }
 
   // check sizes
-  int batch_size = batch_config->num_active_requests() -
-                   batch_config->num_finetuning_fwd_requests() -
-                   batch_config->num_finetuning_bwd_requests();
+  // printf("num_prefill_reqs: %d\n", batch_config->num_prefill_requests());
+  // printf("num_decoding_reqs: %d\n", batch_config->num_decoding_requests());
+  // printf("batch_size: %d\n", batch_size);
+  // printf("decoding: %d\n", decoding);
   assert(batch_size > 0);
+  assert(batch_size <= batch_config->num_inference_requests());
+  if (decoding) {
+    assert(batch_size == batch_config->num_decoding_requests());
+  } else {
+    assert(batch_size == batch_config->num_prefill_requests());
+  }
   // printf("q_indptr_h size: %lu\n", q_indptr_h.size());
   // printf("kv_indptr_h size: %lu\n", kv_indptr_h.size());
   // printf("kv_page_indices_h size: %lu\n", kv_page_indices_h.size());
@@ -241,103 +253,211 @@ void RequestManager::load_batch_config_task(
   }
 
   // load attention metadata
-  int batch_size = batch_config->num_active_requests() -
-                   batch_config->num_finetuning_fwd_requests() -
-                   batch_config->num_finetuning_bwd_requests();
-  if (batch_config->get_mode() == INC_DECODING_MODE && batch_size > 0 &&
+  if (batch_config->get_mode() == INC_DECODING_MODE && batch_config->num_inference_requests() > 0 &&
       handle.incr_attention_metadata->enabled()) {
-    // assert(handle.incr_attention_metadata->enabled());
-    // printf("Entering here, handler: %p\n", handle.incr_attention_metadata);
-    std::vector<int32_t> q_indptr_h;
-    std::vector<int32_t> kv_indptr_h;
-    std::vector<int32_t> kv_page_indices_h;
-    std::vector<int32_t> kv_last_page_len_h;
-    // calculate the attention meta data
-    prepare_inference_params_kernel_h(batch_config,
-                                      q_indptr_h,
-                                      kv_indptr_h,
-                                      kv_page_indices_h,
-                                      kv_last_page_len_h);
-    checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->q_indptr,
-                              q_indptr_h.data(),
-                              sizeof(int32_t) * q_indptr_h.size(),
-                              cudaMemcpyHostToDevice,
-                              stream));
-    checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_indptr,
-                              kv_indptr_h.data(),
-                              sizeof(int32_t) * kv_indptr_h.size(),
-                              cudaMemcpyHostToDevice,
-                              stream));
-    checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_indices,
-                              kv_page_indices_h.data(),
-                              sizeof(int32_t) * kv_page_indices_h.size(),
-                              cudaMemcpyHostToDevice,
-                              stream));
-    checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_last_page_len,
-                              kv_last_page_len_h.data(),
-                              sizeof(int32_t) * kv_last_page_len_h.size(),
-                              cudaMemcpyHostToDevice,
-                              stream));
-    // prepare attention forward handler
-    if (handle.incr_attention_metadata->prompt_handler_collections.count(
-            batch_size) == 0) {
-      handle.incr_attention_metadata->prompt_handler_collections[batch_size] =
-          static_cast<void *>(new flashinfer::BatchPrefillHandler(true));
+    
+    int num_prefill_reqs = batch_config->num_prefill_requests();
+    int num_decoding_reqs = batch_config->num_decoding_requests();
+
+    // printf("num_prefill_reqs: %d\n", num_prefill_reqs);
+    // printf("num_decoding_reqs: %d\n", num_decoding_reqs);
+    
+    // 1. prepare the indptrs for decoding requests, which occupy the first section in the batch
+    // ================================================================
+    if (num_decoding_reqs > 0) {
+      std::vector<int32_t> q_indptr_h;
+      std::vector<int32_t> kv_indptr_h;
+      std::vector<int32_t> kv_page_indices_h;
+      std::vector<int32_t> kv_last_page_len_h;
+      prepare_inference_params_kernel_h(batch_config,
+                                        /*decoding=*/true,
+                                        q_indptr_h,
+                                        kv_indptr_h,
+                                        kv_page_indices_h,
+                                        kv_last_page_len_h);
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->q_indptr_dec,
+                                q_indptr_h.data(),
+                                sizeof(int32_t) * q_indptr_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_indptr_dec,
+                                kv_indptr_h.data(),
+                                sizeof(int32_t) * kv_indptr_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_indices_dec,
+                                kv_page_indices_h.data(),
+                                sizeof(int32_t) * kv_page_indices_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_last_page_len_dec,
+                                kv_last_page_len_h.data(),
+                                sizeof(int32_t) * kv_last_page_len_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      // prepare attention forward handler
+      if (handle.incr_attention_metadata->decode_handler_collections.count(num_decoding_reqs) == 0) {
+        handle.incr_attention_metadata->decode_handler_collections[num_decoding_reqs] = static_cast<void *>(new flashinfer::BatchDecodeHandler(true, num_decoding_reqs));
+        // printf("BatchDecodeHandler %p\n", handle.incr_attention_metadata->decode_handler_collections[num_decoding_reqs]);
+      }
+      BatchDecodeHandler *handler = static_cast<BatchDecodeHandler *>(handle.incr_attention_metadata->decode_handler_collections[num_decoding_reqs]);
+      assert(handler != nullptr && "BatchDecodeHandler is null");
+      
+      handler->SetCUDAStream(stream);
+      // static int step=0;
+      PageManager *pm = PageManager::get_page_manager();
+      // printf("BatchPrefillHandler %p\n", handler);
+      // std::cout << "STEP " << step << ": " << *pm << std::endl;
+      // step+=1;
+      // std::cout << "batch_config: " << *batch_config << std::endl;
+      // std::cout << "q_indptr_h: ";
+      // for (int i = 0; i < q_indptr_h.size(); i++) {
+      //   std::cout << q_indptr_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "kv_indptr_h: ";
+      // for (int i = 0; i < kv_indptr_h.size(); i++) {
+      //   std::cout << kv_indptr_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "kv_page_indices_h: ";
+      // for (int i = 0; i < kv_page_indices_h.size(); i++) {
+      //   std::cout << kv_page_indices_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "kv_last_page_len_h: ";
+      // for (int i = 0; i < kv_last_page_len_h.size(); i++) {
+      //   std::cout << kv_last_page_len_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "batch_size: " << batch_size << std::endl;
+
+      // std::cout << "num_q_heads: " <<
+      // handle.incr_attention_metadata->num_q_heads() << std::endl; std::cout <<
+      // "num_kv_heads: " << handle.incr_attention_metadata->num_kv_heads() <<
+      // std::endl; std::cout << "head_dim: " <<
+      // handle.incr_attention_metadata->head_dim() << std::endl; std::cout <<
+      // "tokens_per_page: " << pm->get_tokens_per_page() << std::endl; std::cout
+      // << "float_workspace_size: " <<
+      // handle.incr_attention_metadata->float_workspace_size << std::endl;
+      // std::cout << "int_workspace_size: " <<
+      // handle.incr_attention_metadata->int_workspace_size << std::endl;
+      DISPATCH_HEADDIM( handle.incr_attention_metadata->head_dim(), HEAD_DIM, {
+        handler->BeginForwardDispatched<HEAD_DIM,
+                                        PageStorage::kIndices,
+                                        LogitsPostHook::kNone,
+                                        PosEncodingMode::kNone,
+                                        half,
+                                        half,
+                                        half,
+                                        int32_t>(
+            static_cast<void *>(handle.incr_attention_metadata->float_workspace_dec),
+            handle.incr_attention_metadata->float_workspace_size,
+            static_cast<void *>(handle.incr_attention_metadata->int_workspace_dec),
+            handle.incr_attention_metadata->int_workspace_size,
+            static_cast<int32_t *>(kv_indptr_h.data()),
+            static_cast<int32_t *>(kv_last_page_len_h.data()),
+            num_decoding_reqs,
+            handle.incr_attention_metadata->num_q_heads(),
+            handle.incr_attention_metadata->num_kv_heads(),
+            pm->get_tokens_per_page());
+      });
     }
-    BatchPrefillHandler *handler = static_cast<BatchPrefillHandler *>(
-        handle.incr_attention_metadata->prompt_handler_collections[batch_size]);
-    handler->SetCUDAStream(stream);
-    // static int step=0;
-    PageManager *pm = PageManager::get_page_manager();
-    // printf("BatchPrefillHandler %p\n", handler);
-    // std::cout << "STEP " << step << ": " << *pm << std::endl;
-    // step+=1;
-    // std::cout << "batch_config: " << *batch_config << std::endl;
-    // std::cout << "q_indptr_h: ";
-    // for (int i = 0; i < q_indptr_h.size(); i++) {
-    //   std::cout << q_indptr_h[i] << " ";
-    // }
-    // std::cout << std::endl;
-    // std::cout << "kv_indptr_h: ";
-    // for (int i = 0; i < kv_indptr_h.size(); i++) {
-    //   std::cout << kv_indptr_h[i] << " ";
-    // }
-    // std::cout << std::endl;
-    // std::cout << "kv_page_indices_h: ";
-    // for (int i = 0; i < kv_page_indices_h.size(); i++) {
-    //   std::cout << kv_page_indices_h[i] << " ";
-    // }
-    // std::cout << std::endl;
-    // std::cout << "kv_last_page_len_h: ";
-    // for (int i = 0; i < kv_last_page_len_h.size(); i++) {
-    //   std::cout << kv_last_page_len_h[i] << " ";
-    // }
-    // std::cout << std::endl;
-    // std::cout << "batch_size: " << batch_size << std::endl;
+    
+    // 2. prepare the indptrs for prefilling requests, which occupy the second section in the batch
+    // ================================================================
+    if (num_prefill_reqs > 0) {
+      std::vector<int32_t> q_indptr_h;
+      std::vector<int32_t> kv_indptr_h;
+      std::vector<int32_t> kv_page_indices_h;
+      std::vector<int32_t> kv_last_page_len_h;
+      prepare_inference_params_kernel_h(batch_config,
+                                        /*decoding=*/false,
+                                        q_indptr_h,
+                                        kv_indptr_h,
+                                        kv_page_indices_h,
+                                        kv_last_page_len_h);
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->q_indptr_pref,
+                                q_indptr_h.data(),
+                                sizeof(int32_t) * q_indptr_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_indptr_pref,
+                                kv_indptr_h.data(),
+                                sizeof(int32_t) * kv_indptr_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_indices_pref,
+                                kv_page_indices_h.data(),
+                                sizeof(int32_t) * kv_page_indices_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      checkCUDA(cudaMemcpyAsync(handle.incr_attention_metadata->kv_last_page_len_pref,
+                                kv_last_page_len_h.data(),
+                                sizeof(int32_t) * kv_last_page_len_h.size(),
+                                cudaMemcpyHostToDevice,
+                                stream));
+      // prepare attention forward handler
+      if (handle.incr_attention_metadata->prompt_handler_collections.count(num_prefill_reqs) == 0) {
+        handle.incr_attention_metadata->prompt_handler_collections[num_prefill_reqs] = static_cast<void *>(new flashinfer::BatchPrefillHandler(true));
+        // printf("BatchPrefillHandler %p\n", handle.incr_attention_metadata->prompt_handler_collections[num_prefill_reqs]);
+      }
+      BatchPrefillHandler *handler = static_cast<BatchPrefillHandler *>(handle.incr_attention_metadata->prompt_handler_collections[num_prefill_reqs]);
+      assert(handler != nullptr && "BatchPrefillHandler is null");
+      
+      handler->SetCUDAStream(stream);
+      // static int step=0;
+      PageManager *pm = PageManager::get_page_manager();
+      // printf("BatchPrefillHandler %p\n", handler);
+      // std::cout << "STEP " << step << ": " << *pm << std::endl;
+      // step+=1;
+      // std::cout << "batch_config: " << *batch_config << std::endl;
+      // std::cout << "q_indptr_h: ";
+      // for (int i = 0; i < q_indptr_h.size(); i++) {
+      //   std::cout << q_indptr_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "kv_indptr_h: ";
+      // for (int i = 0; i < kv_indptr_h.size(); i++) {
+      //   std::cout << kv_indptr_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "kv_page_indices_h: ";
+      // for (int i = 0; i < kv_page_indices_h.size(); i++) {
+      //   std::cout << kv_page_indices_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "kv_last_page_len_h: ";
+      // for (int i = 0; i < kv_last_page_len_h.size(); i++) {
+      //   std::cout << kv_last_page_len_h[i] << " ";
+      // }
+      // std::cout << std::endl;
+      // std::cout << "batch_size: " << batch_size << std::endl;
 
-    // std::cout << "num_q_heads: " <<
-    // handle.incr_attention_metadata->num_q_heads() << std::endl; std::cout <<
-    // "num_kv_heads: " << handle.incr_attention_metadata->num_kv_heads() <<
-    // std::endl; std::cout << "head_dim: " <<
-    // handle.incr_attention_metadata->head_dim() << std::endl; std::cout <<
-    // "tokens_per_page: " << pm->get_tokens_per_page() << std::endl; std::cout
-    // << "float_workspace_size: " <<
-    // handle.incr_attention_metadata->float_workspace_size << std::endl;
-    // std::cout << "int_workspace_size: " <<
-    // handle.incr_attention_metadata->int_workspace_size << std::endl;
+      // std::cout << "num_q_heads: " <<
+      // handle.incr_attention_metadata->num_q_heads() << std::endl; std::cout <<
+      // "num_kv_heads: " << handle.incr_attention_metadata->num_kv_heads() <<
+      // std::endl; std::cout << "head_dim: " <<
+      // handle.incr_attention_metadata->head_dim() << std::endl; std::cout <<
+      // "tokens_per_page: " << pm->get_tokens_per_page() << std::endl; std::cout
+      // << "float_workspace_size: " <<
+      // handle.incr_attention_metadata->float_workspace_size << std::endl;
+      // std::cout << "int_workspace_size: " <<
+      // handle.incr_attention_metadata->int_workspace_size << std::endl;
 
-    handler->BeginForward<half, int32_t>(
-        static_cast<void *>(handle.incr_attention_metadata->float_workspace),
-        handle.incr_attention_metadata->float_workspace_size,
-        static_cast<void *>(handle.incr_attention_metadata->int_workspace),
-        handle.incr_attention_metadata->int_workspace_size,
-        static_cast<int32_t *>(q_indptr_h.data()),
-        static_cast<int32_t *>(kv_indptr_h.data()),
-        batch_size,
-        handle.incr_attention_metadata->num_q_heads(),
-        handle.incr_attention_metadata->num_kv_heads(),
-        handle.incr_attention_metadata->head_dim(),
-        pm->get_tokens_per_page());
+      handler->BeginForward<half, int32_t>(
+          static_cast<void *>(handle.incr_attention_metadata->float_workspace_pref),
+          handle.incr_attention_metadata->float_workspace_size,
+          static_cast<void *>(handle.incr_attention_metadata->int_workspace_pref),
+          handle.incr_attention_metadata->int_workspace_size,
+          static_cast<int32_t *>(q_indptr_h.data()),
+          static_cast<int32_t *>(kv_indptr_h.data()),
+          num_prefill_reqs,
+          handle.incr_attention_metadata->num_q_heads(),
+          handle.incr_attention_metadata->num_kv_heads(),
+          handle.incr_attention_metadata->head_dim(),
+          pm->get_tokens_per_page());
+    }
   }
 }
 

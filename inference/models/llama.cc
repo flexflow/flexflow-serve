@@ -40,7 +40,6 @@ void LLAMA::create_llama_model(FFModel &ff,
             << ff.config.enable_peft_finetuning << std::endl;
   assert(llama_config.hidden_size % llama_config.num_attention_heads == 0 &&
          "Hidden size not divisible by number of attention heads");
-  int head_dim = llama_config.hidden_size / llama_config.num_attention_heads;
   int tot_num_heads =
       llama_config.num_attention_heads + 2 * llama_config.num_key_value_heads;
 
@@ -98,7 +97,7 @@ void LLAMA::create_llama_model(FFModel &ff,
 
     Tensor qkv_proj = ff.dense(
         att_norm,
-        head_dim * tot_num_heads,
+        llama_config.head_dim * tot_num_heads,
         AC_MODE_NONE,
         false,         // seems like llama does not use bias
         DT_NONE,       // what is this
@@ -115,11 +114,11 @@ void LLAMA::create_llama_model(FFModel &ff,
       case BEAM_SEARCH_MODE: {
         mha = ff.spec_inc_multihead_self_attention(
             qkv_proj,
-            llama_config.hidden_size,
+            llama_config.head_dim*llama_config.num_attention_heads,
             llama_config.num_attention_heads,
             llama_config.num_key_value_heads,
-            head_dim,
-            head_dim,
+            llama_config.head_dim,
+            llama_config.head_dim,
             0.0f,    /*dropout*/
             false,   /*add_zero_attn*/
             DT_NONE, /*data_type*/
@@ -137,11 +136,11 @@ void LLAMA::create_llama_model(FFModel &ff,
       case TREE_VERIFY_MODE: {
         mha = ff.inc_multihead_self_attention_verify(
             qkv_proj,
-            llama_config.hidden_size,
+            llama_config.head_dim*llama_config.num_attention_heads,
             llama_config.num_attention_heads,
             llama_config.num_key_value_heads,
-            head_dim,
-            head_dim,
+            llama_config.head_dim,
+            llama_config.head_dim,
             0.0f,    /*dropout*/
             false,   /*add_zero_attn*/
             DT_NONE, /*data_type*/
@@ -159,11 +158,11 @@ void LLAMA::create_llama_model(FFModel &ff,
       case INC_DECODING_MODE: {
         mha = ff.inc_multihead_self_attention(
             qkv_proj,
-            llama_config.hidden_size,
+            llama_config.head_dim*llama_config.num_attention_heads,
             llama_config.num_attention_heads,
             llama_config.num_key_value_heads,
-            head_dim,
-            head_dim,
+            llama_config.head_dim,
+            llama_config.head_dim,
             0.0f,    /*dropout*/
             false,   /*add_zero_attn*/
             DT_NONE, /*data_type*/
@@ -300,8 +299,7 @@ void LLAMA::create_llama_model(FFModel &ff,
   // If PEFT is enabled, add LoRA layers
   if (ff.config.enable_peft) {
     // todo: add attention projections
-    std::vector<std::string> target_modules = {
-        "qkv_proj", "o_proj", "gate_proj", "down_proj", "up_proj"};
+    std::vector<std::string> target_modules = {"down_proj"};
     ff.add_lora_layers(target_modules);
   }
 
@@ -311,7 +309,7 @@ void LLAMA::create_llama_model(FFModel &ff,
                          llama_config.num_attention_heads,
                          llama_config.num_key_value_heads,
                          llama_config.hidden_size,
-                         head_dim,
+                         llama_config.head_dim,
                          ff.config.tensor_parallelism_degree,
                          use_full_precision);
 

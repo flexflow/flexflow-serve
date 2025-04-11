@@ -92,6 +92,10 @@ FFHandler
   handle.quantization_type = info->quantization_type;
   handle.allowTensorOpMathConversion = info->allowTensorOpMathConversion;
 
+  // create additional streams for tasks that require more than 1
+  checkCUDA(cudaStreamCreate(&handle.extra_stream1));
+  checkCUDA(cudaStreamCreate(&handle.extra_stream2));
+
   // flashinfer
   handle.incr_attention_metadata = new AttentionMetaData();
   assert(handle.incr_attention_metadata != nullptr &&
@@ -183,19 +187,12 @@ FFHandler
     handle.batch_config_metadata = nullptr;
   }
 
-  // std::cout << "handle.batch_config_metadata_size: "
-  //           << handle.batch_config_metadata_size << std::endl;
-  // std::cout << "handle.incr_attention_metadata->mem_size(): "
-  //           << handle.incr_attention_metadata->mem_size() << std::endl;
-  if (handle.batch_config_metadata_size +
-      handle.incr_attention_metadata->mem_size()) {
+  if (handle.incr_attention_metadata->mem_size() > 0) {
     // allocate memory for offload reserve space
     Memory gpu_mem = get_proc_mem(Machine::get_machine(), task->target_proc);
     Realm::Rect<1, coord_t> bounds(
         Realm::Point<1, coord_t>(0),
-        Realm::Point<1, coord_t>(handle.batch_config_metadata_size +
-                                 handle.incr_attention_metadata->mem_size() -
-                                 1));
+        Realm::Point<1, coord_t>(handle.incr_attention_metadata->mem_size() - 1));
     std::vector<size_t> field_sizes;
     field_sizes.push_back(sizeof(char));
     Realm::RegionInstance workspaceInst;
@@ -207,14 +204,8 @@ FFHandler
                                            Realm::ProfilingRequestSet())
         .wait();
     void *ptr = workspaceInst.pointer_untyped(0, sizeof(char));
-    handle.batch_config_metadata =
-        static_cast<CombinedBatchConfigMetaStruct *>(ptr);
-    handle.incr_attention_metadata->assign_address(
-        static_cast<void *>(static_cast<char *>(ptr) +
-                            handle.batch_config_metadata_size),
-        handle.incr_attention_metadata->mem_size());
+    handle.incr_attention_metadata->assign_address(ptr, handle.incr_attention_metadata->mem_size());
   } else {
-    handle.batch_config_metadata = nullptr;
     handle.incr_attention_metadata->assign_address(nullptr, 0);
   }
 

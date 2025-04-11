@@ -44,6 +44,12 @@ public:
             num_key_value_heads = num_attention_heads;
           }
           hidden_size = model_config["hidden_size"];
+          if (model_config.find("head_dim") != model_config.end()) {
+            head_dim = model_config["head_dim"];
+          } else {
+            assert(hidden_size % num_attention_heads == 0);
+            head_dim = hidden_size / num_attention_heads;
+          }
           rms_norm_eps = model_config["rms_norm_eps"];
           intermediate_size = model_config["intermediate_size"];
           rotary_embedding_meta.apply_rotary_embedding = true;
@@ -89,6 +95,7 @@ public:
       std::cout << "\tnum_key_value_heads: " << num_key_value_heads
                 << std::endl;
       std::cout << "\thidden_size: " << hidden_size << std::endl;
+      std::cout << "\thead_dim: " << head_dim << std::endl;
       std::cout << "\trms_norm_eps: " << rms_norm_eps << std::endl;
       std::cout << "\tintermediate_size: " << intermediate_size << std::endl;
       std::cout << "\trotary_embedding_meta: " << rotary_embedding_meta
@@ -99,7 +106,7 @@ public:
 
     int max_beam_width, max_beam_depth;
     int num_hidden_layers, vocab_size, num_attention_heads, num_key_value_heads,
-        hidden_size, intermediate_size;
+        hidden_size, intermediate_size, head_dim;
     float rms_norm_eps;
     RotaryEmbeddingMeta rotary_embedding_meta;
   };
