@@ -124,14 +124,13 @@ __global__ void apply_proj_bias_qkv(DT *input_ptr,
 
 template <typename DT>
 __global__ void scaling_query_kernel(DT *input_ptr,
-                                     int qk_dim,
                                      int num_tokens,
-                                     int num_q_heads,
                                      float scaling_factor,
-                                     int hidden_size) {
-  CUDA_KERNEL_LOOP(i, num_tokens * hidden_size) {
-    int token_idx = i / hidden_size;
-    input_ptr[i % hidden_size + token_idx * hidden_size * QKV_WEIGHT_NUM] *=
+                                     int q_heads_dim,
+                                     int total_heads_dim) {
+  CUDA_KERNEL_LOOP(i, num_tokens * q_heads_dim) {
+    int token_idx = i / q_heads_dim;
+    input_ptr[i % q_heads_dim + token_idx * total_heads_dim] *=
         scaling_factor;
   }
 }
@@ -160,21 +159,17 @@ void compute_qkv(IncMultiHeadSelfAttentionMeta const *m,
   {
     DT alpha = 1.0f, beta = 0.0f;
     // after transpositions
-    int m_q = m->qk_dim * m->num_q_heads;
-    int m_k = m->qk_dim * m->num_q_heads;
-    int m_v = m->v_dim * m->num_q_heads;
-    assert(m_q == m_k && m_k == m_v); // keep things simple for now
     int n = bc->num_active_tokens();
     int k = m->hidden_size;
-    int m_ = m_q * QKV_WEIGHT_NUM;
+    int m_ = m->total_heads_dim;
     // before transpositions
     int lda = k, ldb = k, ldc = m_;
     // matrix A: QKV weights
-    // matrix A's layout: [hidden_size (hidden_dim), qk_dim, num_heads, 3]
+    // matrix A's layout: [hidden_size (hidden_dim), num_heads_dim(q+k+v)]
     // matrix B: input
     // matrix B's layout: [hidden_size (hidden_dim), num_new_tokens]
     // matrix C: devQKVProjArray
-    // matrix B's layout: [qk_dim, num_heads, 3, num_new_tokens]
+    // matrix B's layout: [num_heads_dim(q+k+v), num_new_tokens]
     m->handle.gemm_engine->gemm_internal(CUBLAS_OP_T,
                                          CUBLAS_OP_N,
                                          m_,
@@ -209,6 +204,8 @@ void compute_qkv(IncMultiHeadSelfAttentionMeta const *m,
 
   // Step 2: apply bias for QKV, or scale the query
   if (*m->qkv_bias) {
+    assert(false && "TODO not resolved");
+    // TODO: bias, change QKV_WEIGHT_NUM to q_heads+k_heads+v_heads
     apply_proj_bias_qkv<<<GET_BLOCKS(parallelism),
                           min(CUDA_NUM_THREADS, parallelism),
                           0,
@@ -229,10 +226,9 @@ void compute_qkv(IncMultiHeadSelfAttentionMeta const *m,
                            0,
                            stream>>>(output_ptr,
                                      num_tokens,
-                                     m->num_q_heads,
-                                     m->qk_dim,
                                      m->scaling_factor,
-                                     m->local_hidden_size);
+                                     m->qk_dim * m->num_q_heads,
+                                     m->total_heads_dim);
   }
 }
 
@@ -248,22 +244,22 @@ __global__ void apply_pos_encoding_to_tokens_in_batch_kernel(
     int original_max_position_embeddings,
     int qk_dim,
     int num_tokens,
-    size_t q_array_size,
-    int hidden_size) {
-  CUDA_KERNEL_LOOP(i, num_tokens * hidden_size) {
+    int q_heads_dim,
+    int k_heads_dim,
+    int total_heads_dim) {
+  int per_token_size = (q_heads_dim + k_heads_dim) / 2;
+  CUDA_KERNEL_LOOP(i, num_tokens * per_token_size) {
     // create complex number
-    bool q_tensor = i < (q_array_size / 2);
-    int proj_size = q_tensor ? qk_dim : qk_dim;
-    int real_i = q_tensor ? i : i - q_array_size / 2;
-
-    int token_idx = real_i / (hidden_size / 2);
-    int idx = real_i % (proj_size / 2);
-    int head_idx = (real_i - (token_idx * (hidden_size / 2))) / (proj_size / 2);
-
-    int real_part_index = idx + head_idx * proj_size +
-                          token_idx * hidden_size * QKV_WEIGHT_NUM +
-                          hidden_size * (q_tensor ? 0 : 1);
-    int complex_part_index = real_part_index + (proj_size / 2);
+    int token_idx = i / per_token_size;
+    int idx = i % per_token_size;
+    bool q_tensor = idx < q_heads_dim / 2;
+    if (!q_tensor) {
+      idx -= q_heads_dim / 2;
+    }
+    int head_idx = idx / (qk_dim / 2);
+    idx = idx % (qk_dim / 2);
+    int real_part_index = token_idx * total_heads_dim + (q_tensor ? 0 : q_heads_dim) + head_idx * qk_dim + idx;
+    int complex_part_index = real_part_index + qk_dim / 2;
 
     cuFloatComplex cii = {input_ptr[real_part_index],
                           input_ptr[complex_part_index]};
@@ -276,7 +272,7 @@ __global__ void apply_pos_encoding_to_tokens_in_batch_kernel(
 
     size_t pos = tokenInfos[token_idx].abs_depth_in_request;
 
-    float freq = pos * (1.0 / pow(rope_theta, (float)2 * idx / proj_size));
+    float freq = pos * (1.0 / pow(rope_theta, (float)2 * idx / qk_dim));
 
     if (llama3_rope) {
       float pi = CUDART_PI_F;
@@ -319,8 +315,9 @@ void apply_pos_encoding_to_tokens_in_batch(
   if (num_tokens == 0) {
     return;
   }
-  int parallelism = num_tokens * m->local_hidden_size;
-  size_t q_array_size = m->qk_dim * num_tokens * m->num_q_heads;
+  int q_heads_dim = m->qk_dim * m->num_q_heads;
+  int k_heads_dim = m->qk_dim * m->num_kv_heads;
+  int parallelism = num_tokens * (q_heads_dim + k_heads_dim) / 2;
   bool llama3_rope = (m->rotary_embedding_meta->rope_type == "llama3");
   apply_pos_encoding_to_tokens_in_batch_kernel<<<GET_BLOCKS(parallelism),
                                                  min(CUDA_NUM_THREADS,
@@ -337,8 +334,9 @@ void apply_pos_encoding_to_tokens_in_batch(
       m->rotary_embedding_meta->original_max_position_embeddings,
       m->qk_dim,
       num_tokens,
-      q_array_size,
-      m->local_hidden_size);
+      q_heads_dim,
+      k_heads_dim,
+      m->total_heads_dim);
 }
 
 __global__ void apply_pos_encoding_to_streaming_proj_kernel(
@@ -472,12 +470,11 @@ __global__ void
                                int num_kv_heads,
                                int head_dim,
                                int num_new_tokens) {
-  int const q_hidden_size = num_q_heads * head_dim;
-  int const temp_kv_hidden_size = num_q_heads * head_dim; // temporary hard code
-  int const kv_hidden_size = num_kv_heads * head_dim;
+  int const q_heads_dim = num_q_heads * head_dim;
+  int const kv_heads_dim = num_kv_heads * head_dim;
   int const thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int const token_idx = thread_idx / q_hidden_size;
-  int const offset = thread_idx % q_hidden_size;
+  int const token_idx = thread_idx / q_heads_dim;
+  int const offset = thread_idx % q_heads_dim;
   if (token_idx >= num_new_tokens) {
     return;
   }
@@ -485,24 +482,21 @@ __global__ void
   int const req_idx = tokenInfos[token_idx].request_index;
   int token_abs_idx = tokenInfos[token_idx].abs_index_in_request;
 
-  size_t from_idx = token_idx * (q_hidden_size + temp_kv_hidden_size * 2);
-  qTmp_ptr[token_idx * q_hidden_size + offset] =
+  size_t from_idx = token_idx * (q_heads_dim + kv_heads_dim * 2);
+  qTmp_ptr[token_idx * q_heads_dim + offset] =
       static_cast<half>(qkv_proj_array[from_idx + offset]);
 
-  if (offset < kv_hidden_size) {
+  if (offset < kv_heads_dim) {
     size_t to_k_idx = get_k_entry_offset(
                req_idx, token_abs_idx, max_num_pages, num_kv_heads, head_dim),
            to_v_idx = get_v_entry_offset(
                req_idx, token_abs_idx, max_num_pages, num_kv_heads, head_dim);
     // key and value cache should be stored interleaved
-    int const stride = num_q_heads / num_kv_heads;
-    int const kv_offset =
-        offset / head_dim * stride * head_dim + offset % head_dim;
     kvCache_ptr[to_k_idx + offset] =
-        static_cast<half>(qkv_proj_array[from_idx + q_hidden_size + kv_offset]);
+        static_cast<half>(qkv_proj_array[from_idx + q_heads_dim + offset]);
     kvCache_ptr[to_v_idx + offset] =
-        static_cast<half>(qkv_proj_array[from_idx + q_hidden_size +
-                                         temp_kv_hidden_size + kv_offset]);
+        static_cast<half>(qkv_proj_array[from_idx + q_heads_dim +
+                                         kv_heads_dim + offset]);
   }
 }
 
@@ -514,7 +508,7 @@ void update_qkv_in_batch(IncMultiHeadSelfAttentionMeta const *m,
   if (num_new_tokens == 0) {
     return;
   }
-  int parallelism = m->local_hidden_size * num_new_tokens;
+  int parallelism = m->num_q_heads * m->qk_dim * num_new_tokens;
   int const max_num_pages =
       round_up_pages(BatchConfig::max_sequence_length() +
                      BatchConfig::max_spec_tree_token_num());
@@ -749,12 +743,11 @@ __global__ void
                      int head_dim,
                      StreamingCacheInfo const *streaming_cache_infos,
                      int num_new_tokens) {
-  int const q_hidden_size = num_q_heads * head_dim;
-  int const temp_kv_hidden_size = num_q_heads * head_dim; // temporary hard code
-  int const kv_hidden_size = num_kv_heads * head_dim;
+  int const q_heads_dim = num_q_heads * head_dim;
+  int const kv_heads_dim = num_kv_heads * head_dim;
   int const thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int const token_idx = thread_idx / kv_hidden_size;
-  int const offset = thread_idx % kv_hidden_size;
+  int const token_idx = thread_idx / kv_heads_dim;
+  int const offset = thread_idx % kv_heads_dim;
   if (token_idx >= num_new_tokens) {
     return;
   }
@@ -784,21 +777,17 @@ __global__ void
   // for more than once. In this case, we should only count the last tokens in
   // the same window position.
 
-  size_t from_idx = token_idx * (q_hidden_size + temp_kv_hidden_size * 2);
+  size_t from_idx = token_idx * (q_heads_dim + kv_heads_dim * 2);
   size_t to_k_idx = get_k_entry_offset(
              request_idx, to_idx, max_num_pages, num_kv_heads, head_dim),
          to_v_idx = get_v_entry_offset(
              request_idx, to_idx, max_num_pages, num_kv_heads, head_dim);
 
-  int const stride = num_q_heads / num_kv_heads;
-  int const kv_offset =
-      offset / head_dim * stride * head_dim + offset % head_dim;
-
   pre_pos_enc_buf[to_k_idx + offset] =
-      static_cast<half>(qkv_proj_array[from_idx + q_hidden_size + kv_offset]);
+      static_cast<half>(qkv_proj_array[from_idx + q_heads_dim + offset]);
   pre_pos_enc_buf[to_v_idx + offset] =
-      static_cast<half>(qkv_proj_array[from_idx + q_hidden_size +
-                                       temp_kv_hidden_size + kv_offset]);
+      static_cast<half>(qkv_proj_array[from_idx + q_heads_dim +
+                                       kv_heads_dim + offset]);
 }
 
 template <typename DT>
@@ -878,9 +867,7 @@ void compute_o_prod_bias(IncMultiHeadSelfAttentionMeta const *m,
     int lda = k, ldb = k, ldc = m_;
     // matrix A: output projection weight
     // matrix A's layout: [v_dim * num_heads, o_dim]
-    DT const *A = weight_ptr + m->hidden_size * (m->qk_dim * m->num_q_heads +
-                                                 m->qk_dim * m->num_q_heads +
-                                                 m->v_dim * m->num_q_heads);
+    DT const *A = weight_ptr + m->hidden_size * m->total_heads_dim;
     // matrix B: attn heads
     // matrix B's layout: [v_dim * num_heads, num_new_tokens]
     DT const *B = static_cast<DT *>(m->attn_heads);
@@ -905,6 +892,8 @@ void compute_o_prod_bias(IncMultiHeadSelfAttentionMeta const *m,
   }
   // Add final output bias
   if (*m->final_bias && shard_id == 0) {
+    assert(false && "TODO not resolved");
+    // TODO: bias, change QKV_WEIGHT_NUM to q_heads+k_heads+v_heads
     int parallelism = m->o_dim * num_tokens;
     int qkv_weight_size = m->qk_dim * m->global_num_q_heads +
                           m->qk_dim * m->global_num_q_heads +

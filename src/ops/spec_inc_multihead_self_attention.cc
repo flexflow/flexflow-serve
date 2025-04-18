@@ -154,8 +154,8 @@ Tensor FFModel::spec_inc_multiquery_self_attention(
   int kParas = qk_dim * hidden_size;
   int vParas = v_dim * hidden_size;
   int oParas = o_dim * (v_dim > 0 ? v_dim : hidden_size);
-  int weight_size = qParas * num_q_heads + kParas * num_q_heads +
-                    vParas * num_q_heads + oParas * num_q_heads;
+  int weight_size = qParas * num_q_heads + kParas * num_kv_heads +
+                    vParas * num_kv_heads + oParas * num_q_heads;
   {
     int dims[1] = {weight_size};
     li->weights[0] = create_weight_legion_ordering(1,
@@ -350,7 +350,7 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
     dims[0].size = dims[0].degree;
     dims[1] = inputs[0]->dims[num_dims - 1];
     dims[1].size = this->num_q_heads * (qParas + oParas) +
-                   this->num_q_heads * (kParas + vParas);
+                   this->num_kv_heads * (kParas + vParas);
     dims[1].is_replica_dim = false;
     int seed = std::rand();
     Initializer *initializer = new GlorotUniform(seed);
@@ -453,7 +453,7 @@ SpecIncMultiHeadSelfAttention::SpecIncMultiHeadSelfAttention(
     dims[0].size = dims[0].degree;
     dims[1] = inputs[0]->dims[num_dims - 1];
     dims[1].size = this->num_q_heads * (qParas + oParas) +
-                   this->num_q_heads * (kParas + vParas);
+                   this->num_kv_heads * (kParas + vParas);
     dims[1].is_replica_dim = false;
     // dims[2].size = qParas + kParas + vParas + oParas;
     int seed = std::rand();

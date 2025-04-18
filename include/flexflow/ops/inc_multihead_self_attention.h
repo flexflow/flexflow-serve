@@ -178,7 +178,7 @@ public:
       quantized_weightSize;
   int hidden_size, qk_dim, v_dim, o_dim;
   int global_num_q_heads, global_num_kv_heads, num_q_heads, num_kv_heads,
-      local_hidden_size;
+      local_hidden_size, total_heads_dim;
   bool *has_load_weights;
   RotaryEmbeddingMeta *rotary_embedding_meta;
   bool *qkv_bias;

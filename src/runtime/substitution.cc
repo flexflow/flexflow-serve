@@ -57,7 +57,7 @@ using namespace Legion;
 Legion::Logger log_xfers("xfers");
 Legion::Logger log_xfer_matches("xfer_matches");
 
-const TensorX TensorX::NO_TX = TensorX();
+TensorX const TensorX::NO_TX = TensorX();
 
 bool TensorX::operator==(TensorX const &other) const {
   return this->op == other.op && this->idx == other.idx;
@@ -155,7 +155,7 @@ tl::optional<ParallelTensor> TensorX::to_tensor(GraphXfer const *xfer) const {
   }
 }
 
-OpX::OpX(const OperatorType _type,
+OpX::OpX(OperatorType const _type,
          int num_inputs,
          int num_outputs,
          TensorX const &input0,
@@ -177,7 +177,7 @@ OpX::OpX(const OperatorType _type,
   }
 }
 
-OpX::OpX(const OperatorType _type,
+OpX::OpX(OperatorType const _type,
          int num_inputs,
          int num_outputs,
          TensorX const *input_array)
@@ -1301,16 +1301,10 @@ void Graph::export_strategy_computation_graph(
           weight_mem /= (*node.ptr->weights)->get_total_num_parts();
         }
 
-        runtime_code << "fwd"
-                     << "bwd"
-                     << "sync"
-                     << "secs";
+        runtime_code << "fwd" << "bwd" << "sync" << "secs";
         runtime_cost_row << op_cost.forward_time << op_cost.backward_time
                          << op_cost.sync_time;
-        memory_code << "in"
-                    << "out"
-                    << "weight"
-                    << "bytes";
+        memory_code << "in" << "out" << "weight" << "bytes";
         memory_cost_row << input_mem << output_mem << weight_mem;
         rf << runtime_code << runtime_cost_row << memory_code
            << memory_cost_row;
@@ -1402,8 +1396,7 @@ void create_mapping_xfers(
                    op_type_name.begin(),
                    [](unsigned char c) { return std::tolower(c); });
     oss << "mapping::" << pre_name << "_" << op_type_name << "_" << post_name
-        << "["
-        << "input_dim=" << input_dim << ",degree=" << degree << "]";
+        << "[" << "input_dim=" << input_dim << ",degree=" << degree << "]";
     subst->name = oss.str();
 
     xfers.push_back(subst);
@@ -3082,9 +3075,9 @@ GraphXfer *create_partition_linear_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "partition_linear_combine["
-      << "num_dims=" << num_dims << ",num_parts=" << num_parts
-      << ",activation=" << activation << ",use_bias=" << use_bias << "]";
+  oss << "partition_linear_combine[" << "num_dims=" << num_dims
+      << ",num_parts=" << num_parts << ",activation=" << activation
+      << ",use_bias=" << use_bias << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3109,8 +3102,8 @@ GraphXfer *create_partition_conv2d_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "partition_conv2d_combine["
-      << "num_dims=" << num_dims << ",num_parts=" << num_parts << "]";
+  oss << "partition_conv2d_combine[" << "num_dims=" << num_dims
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3207,8 +3200,8 @@ GraphXfer *create_partition_attention_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "partition_attention_combine["
-      << "num_heads=" << num_heads << ",num_parts=" << num_parts << "]";
+  oss << "partition_attention_combine[" << "num_heads=" << num_heads
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3236,8 +3229,8 @@ GraphXfer *create_replicate_attention_reduce(FFModel *model,
   subst->dstOps.push_back(reduce);
 
   std::ostringstream oss;
-  oss << "replicate_attention_reduce["
-      << "num_heads=" << num_heads << ",num_parts=" << num_parts << "]";
+  oss << "replicate_attention_reduce[" << "num_heads=" << num_heads
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3266,9 +3259,9 @@ GraphXfer *create_replicate_linear_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "replicate_linear_combine["
-      << "num_dims=" << num_dims << ",num_parts=" << num_parts
-      << ",activation=" << activation << ",use_bias=" << use_bias << "]";
+  oss << "replicate_linear_combine[" << "num_dims=" << num_dims
+      << ",num_parts=" << num_parts << ",activation=" << activation
+      << ",use_bias=" << use_bias << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3297,8 +3290,8 @@ GraphXfer *create_partition_add_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "partition_add_combine["
-      << "parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
+  oss << "partition_add_combine[" << "parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3326,8 +3319,8 @@ GraphXfer *create_combine_add_partition(FFModel *model,
   subst->dstOps.push_back(repartition);
 
   std::ostringstream oss;
-  oss << "combine_add_partition["
-      << "parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
+  oss << "combine_add_partition[" << "parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3354,8 +3347,8 @@ GraphXfer *create_partition_relu_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "partition_relu_combine["
-      << "parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
+  oss << "partition_relu_combine[" << "parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3382,8 +3375,8 @@ GraphXfer *create_combine_relu_partition(FFModel *model,
   subst->dstOps.push_back(partition);
 
   std::ostringstream oss;
-  oss << "combine_relu_partition["
-      << "parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
+  oss << "combine_relu_partition[" << "parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3419,9 +3412,9 @@ GraphXfer *create_partition_concat_combine(FFModel *model,
   subst->map_output(concat->outputs[0], combine->outputs[0]);
 
   std::ostringstream oss;
-  oss << "partition_concat_combine["
-      << "num_inputs=" << num_inputs << ",concat_dim=" << concat_dim
-      << ",parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
+  oss << "partition_concat_combine[" << "num_inputs=" << num_inputs
+      << ",concat_dim=" << concat_dim << ",parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3446,9 +3439,8 @@ GraphXfer *create_partition_softmax_combine(FFModel *model,
   subst->dstOps.push_back(combine);
 
   std::ostringstream oss;
-  oss << "partition_softmax_combine["
-      << "softmax_dim=" << softmax_dim << ",parallel_dim=" << parallel_dim
-      << ",num_parts=" << num_parts << "]";
+  oss << "partition_softmax_combine[" << "softmax_dim=" << softmax_dim
+      << ",parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3473,9 +3465,8 @@ GraphXfer *create_combine_softmax_partition(FFModel *model,
   subst->dstOps.push_back(repartition);
 
   std::ostringstream oss;
-  oss << "combine_softmax_partition["
-      << "softmax_dim=" << softmax_dim << ",parallel_dim=" << parallel_dim
-      << ",num_parts=" << num_parts << "]";
+  oss << "combine_softmax_partition[" << "softmax_dim=" << softmax_dim
+      << ",parallel_dim=" << parallel_dim << ",num_parts=" << num_parts << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3514,9 +3505,8 @@ GraphXfer *leading_relu_branch_combine(FFModel *model,
   subst->dstOps.insert(subst->dstOps.end(), new_noops.begin(), new_noops.end());
 
   std::ostringstream oss;
-  oss << "leading_relu_branch_combine["
-      << "parallel_dim=" << parallel_dim << ",num_parts=" << num_parts
-      << ",num_combines=" << num_combines << "]";
+  oss << "leading_relu_branch_combine[" << "parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << ",num_combines=" << num_combines << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3553,9 +3543,9 @@ GraphXfer *leading_relu_branch_partition(FFModel *model,
   subst->dstOps.insert(subst->dstOps.end(), new_noops.begin(), new_noops.end());
 
   std::ostringstream oss;
-  oss << "leading_relu_branch_partition["
-      << "parallel_dim=" << parallel_dim << ",num_parts=" << num_parts
-      << ",num_partitions=" << num_partitions << "]";
+  oss << "leading_relu_branch_partition[" << "parallel_dim=" << parallel_dim
+      << ",num_parts=" << num_parts << ",num_partitions=" << num_partitions
+      << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3578,8 +3568,8 @@ GraphXfer *
   subst->dstOps.push_back(new_linear);
 
   std::ostringstream oss;
-  oss << "linear_relu_merge["
-      << "num_dims=" << num_dims << ",use_bias=" << use_bias << "]";
+  oss << "linear_relu_merge[" << "num_dims=" << num_dims
+      << ",use_bias=" << use_bias << "]";
   subst->name = oss.str();
 
   return subst;
@@ -3824,12 +3814,11 @@ bool FFModel::convert_graph_to_operators(
         break;
       }
       case OP_SIGMOID_SILU_MULTI: {
-        assert(inList.size() == 2);
+        assert(inList.size() == 1);
         SigmoidSiluMulti *ssm = (SigmoidSiluMulti *)node.ptr;
         new_op = new SigmoidSiluMulti(*this,
                                       ssm->layer_guid,
                                       inputs[0],
-                                      inputs[1],
                                       ssm->intermediate_size,
                                       ssm->tensor_parallelism_degree,
                                       NULL);

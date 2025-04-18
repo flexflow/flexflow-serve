@@ -1081,14 +1081,13 @@ __host__ void
             break;
           }
           case OP_SIGMOID_SILU_MULTI: {
-            assert(fused->op_num_inputs[op] == 2);
+            assert(fused->op_num_inputs[op] == 1);
             assert(fused->op_num_outputs[op] == 1);
             SigmoidSiluMultiMeta const *m =
                 (SigmoidSiluMultiMeta *)metas->meta[op];
             // use active number of tokens
             SigmoidSiluMulti::inference_kernel_wrapper(m,
                                                        my_input_accessor[0],
-                                                       my_input_accessor[1],
                                                        my_output_accessor[0],
                                                        bc->num_active_tokens());
             break;

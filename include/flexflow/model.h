@@ -579,8 +579,7 @@ public:
                                     DataType data_type = DT_NONE,
                                     char const *name = NULL);
   // Add a sigmoid_silu_multi layer
-  Tensor sigmoid_silu_multi(Tensor const input1,
-                            Tensor const input2,
+  Tensor sigmoid_silu_multi(Tensor const input,
                             int intermediate_size,
                             DataType data_type = DT_NONE,
                             char const *name = NULL);
@@ -711,7 +710,7 @@ public:
                              Initializer *kernel_initializer = NULL,
                              char const *name = NULL);
   Tensor inc_multihead_self_attention(
-      const Tensor input,
+      Tensor const input,
       int embed_dim,
       int num_heads,
       int kdim = 0,
@@ -730,7 +729,7 @@ public:
       bool streaming_cache = false,
       char const *name = NULL);
   Tensor spec_inc_multihead_self_attention(
-      const Tensor input,
+      Tensor const input,
       int embed_dim,
       int num_heads,
       int kdim = 0,
@@ -1219,10 +1218,8 @@ public:
           std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
                     AddBiasResidualLayerNormParams>,
           AddBiasResidualLayerNorm *>,
-      std::unordered_map<
-          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
-                    SigmoidSiluMultiParams>,
-          SigmoidSiluMulti *>,
+      std::unordered_map<std::pair<ParallelTensorShape, SigmoidSiluMultiParams>,
+                         SigmoidSiluMulti *>,
       std::unordered_map<std::pair<ParallelTensorShape, LinearParams>,
                          Linear *>,
       std::unordered_map<std::pair<ParallelTensorShape, Pool2DParams>,

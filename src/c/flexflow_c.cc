@@ -36,7 +36,9 @@ public:
     t_.impl = const_cast<void *>(static_cast<void const *>(t));                \
     return t_;                                                                 \
   }                                                                            \
-  static T unwrap(T_ t_) { return static_cast<T>(t_.impl); }                   \
+  static T unwrap(T_ t_) {                                                     \
+    return static_cast<T>(t_.impl);                                            \
+  }                                                                            \
   static const T unwrap_const(const T_ t_) {                                   \
     return static_cast<const T>(t_.impl);                                      \
   }
@@ -746,19 +748,16 @@ flexflow_tensor_t *flexflow_model_add_add_bias_residual_layer_norm(
 
 flexflow_tensor_t
     flexflow_model_add_sigmoid_silu_multi(flexflow_model_t handle_,
-                                          flexflow_tensor_t const input1_,
-                                          flexflow_tensor_t const input2_,
+                                          flexflow_tensor_t const input_,
                                           int intermediate_size,
                                           char const *name) {
   FFModel *handle = FFCObjectWrapper::unwrap(handle_);
-  Tensor const input1 = FFCObjectWrapper::unwrap(input1_);
-  Tensor const input2 = FFCObjectWrapper::unwrap(input2_);
+  Tensor const input = FFCObjectWrapper::unwrap(input_);
   Tensor tensor = handle->sigmoid_silu_multi(
-      input1, input2, intermediate_size, input1->data_type, name);
-  DEBUG_PRINT("[SigmoidSiluMulti] new Tensor %p, input1 %p, input2 %p, name %s",
+      input, intermediate_size, input->data_type, name);
+  DEBUG_PRINT("[SigmoidSiluMulti] new Tensor %p, input %p, name %s",
               tensor,
-              input1,
-              input2,
+              input,
               name);
   return FFCObjectWrapper::wrap(tensor);
 }

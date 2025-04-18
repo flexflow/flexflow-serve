@@ -2056,6 +2056,7 @@ BatchConfig RequestManager::prepare_verify_batch_config() {
     new_bc.print();
   }
   profiling.llm_step_start = Realm::Clock::current_time_in_microseconds();
+  profiling.tokens_in_verification_per_step.push_back(new_bc.num_tokens);
   return new_bc;
 }
 
@@ -3285,6 +3286,39 @@ void RequestManager::terminate_background_server() {
     average_tpot_per_slo_ms += ")";
     str += average_tpot_per_slo_ms;
 
+    // Create a map to store all individual tpot values per SLO ratio
+    std::unordered_map<double, std::vector<double>> tpots_by_slo;
+    for (auto const &profiling_info : profiling_requests) {
+      double per_token_time_ms = 0;
+      auto const &request = all_requests[profiling_info.first];
+      auto const &profiling = profiling_info.second;
+      if (profiling.start_decoding_time != 0) {
+        per_token_time_ms =
+            (profiling.finish_time - profiling.start_decoding_time) / 1000.0 /
+            request.decode_length();
+        // Store the individual tpot value in the appropriate SLO group
+        tpots_by_slo[request.slo_ratio].push_back(per_token_time_ms);
+      }
+    }
+
+    // Format and output all individual tpot values by SLO group
+    std::string all_tpots_by_slo = "\n all_tpots_by_slo_ms( ";
+    for (auto const &kv : tpots_by_slo) {
+      double slo_ratio = kv.first;
+      std::vector<double> const &tpot_values = kv.second;
+
+      all_tpots_by_slo += std::to_string(slo_ratio) + ":[";
+      for (size_t i = 0; i < tpot_values.size(); ++i) {
+        all_tpots_by_slo += std::to_string(tpot_values[i]);
+        if (i < tpot_values.size() - 1) {
+          all_tpots_by_slo += ",";
+        }
+      }
+      all_tpots_by_slo += "] ";
+    }
+    all_tpots_by_slo += ")";
+    str += all_tpots_by_slo;
+
     std::string req_per_step = "\n requests_per_step( ";
     for (int nb : profiling.requests_per_step) {
       req_per_step += std::to_string(nb) + " ";
@@ -3325,6 +3359,162 @@ void RequestManager::terminate_background_server() {
     }
     generated_tokens_per_step += ")";
     str += generated_tokens_per_step;
+
+    std::string tokens_in_verification_per_step =
+        "\n tokens_in_verification_per_step( ";
+    for (int nb : profiling.tokens_in_verification_per_step) {
+      tokens_in_verification_per_step += std::to_string(nb) + " ";
+    }
+    tokens_in_verification_per_step += ")";
+    str += tokens_in_verification_per_step;
+
+    // Add this after the llm_step_times_ms section but before the
+    // generated_tokens_per_step section
+
+    // Group llm_step_times_ms by tokens_in_verification_per_step
+    std::unordered_map<int, std::vector<double>>
+        llm_times_by_verification_tokens;
+    for (size_t i = 0; i < profiling.llm_step_times.size() &&
+                       i < profiling.tokens_in_verification_per_step.size();
+         i++) {
+      int tokens = profiling.tokens_in_verification_per_step[i];
+      llm_times_by_verification_tokens[tokens].push_back(
+          profiling.llm_step_times[i]);
+    }
+
+    // Calculate and output average llm_step_times for each group
+    std::string avg_llm_time_by_verification_tokens =
+        "\n avg_llm_time_by_verification_tokens( ";
+    for (auto const &group : llm_times_by_verification_tokens) {
+      int tokens = group.first;
+      std::vector<double> const &times = group.second;
+
+      // Calculate average time for this group
+      double avg_time = 0.0;
+      if (!times.empty()) {
+        avg_time =
+            std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+      }
+
+      // Add to output string
+      avg_llm_time_by_verification_tokens +=
+          std::to_string(tokens) + ":" + std::to_string(avg_time) + "\n";
+    }
+    avg_llm_time_by_verification_tokens += ")";
+    str += avg_llm_time_by_verification_tokens;
+
+    // Calculate verification throughput (tokens/s) for each step
+    std::unordered_map<int, std::vector<double>>
+        verification_throughput_by_tokens;
+    for (size_t i = 0; i < profiling.llm_step_times.size() &&
+                       i < profiling.tokens_in_verification_per_step.size();
+         i++) {
+      int tokens = profiling.tokens_in_verification_per_step[i];
+      double step_time = profiling.llm_step_times[i];
+
+      // Avoid division by zero
+      if (step_time > 0) {
+        double throughput = tokens / step_time * 1000; // tokens per s
+        verification_throughput_by_tokens[tokens].push_back(throughput);
+      }
+    }
+
+    // Calculate and output average verification throughput for each group
+    std::string avg_verification_throughput =
+        "\n avg_verification_throughput_tokens_per_s( ";
+    for (auto const &group : verification_throughput_by_tokens) {
+      int tokens = group.first;
+      std::vector<double> const &throughputs = group.second;
+
+      // Calculate average throughput for this group
+      double avg_throughput = 0.0;
+      if (!throughputs.empty()) {
+        avg_throughput =
+            std::accumulate(throughputs.begin(), throughputs.end(), 0.0) /
+            throughputs.size();
+      }
+
+      // Add to output string
+      avg_verification_throughput +=
+          std::to_string(tokens) + ":" + std::to_string(avg_throughput) + "\n";
+    }
+    avg_verification_throughput += ")";
+    str += avg_verification_throughput;
+
+    // Group generated_tokens_per_step by tokens_in_verification_per_step
+    std::unordered_map<int, std::vector<int>>
+        generated_tokens_by_verification_tokens;
+    for (size_t i = 0; i < profiling.generated_tokens_per_step.size() &&
+                       i < profiling.tokens_in_verification_per_step.size();
+         i++) {
+      int verification_tokens = profiling.tokens_in_verification_per_step[i];
+      int generated_tokens = profiling.generated_tokens_per_step[i];
+      generated_tokens_by_verification_tokens[verification_tokens].push_back(
+          generated_tokens);
+    }
+
+    // Calculate and output average generated tokens for each verification token
+    // group
+    std::string avg_generated_tokens_by_verification =
+        "\n avg_generated_tokens_by_verification( ";
+    for (auto const &group : generated_tokens_by_verification_tokens) {
+      int verification_tokens = group.first;
+      std::vector<int> const &generated_tokens = group.second;
+
+      // Calculate average generated tokens for this group
+      double avg_tokens = 0.0;
+      if (!generated_tokens.empty()) {
+        avg_tokens = std::accumulate(generated_tokens.begin(),
+                                     generated_tokens.end(),
+                                     0.0) /
+                     generated_tokens.size();
+      }
+
+      // Add to output string
+      avg_generated_tokens_by_verification +=
+          std::to_string(verification_tokens) + ":" +
+          std::to_string(avg_tokens) + " ";
+    }
+    avg_generated_tokens_by_verification += ")";
+    str += avg_generated_tokens_by_verification;
+
+    // Calculate generation throughput (average generated tokens / average llm
+    // step time) for each verification token group
+    std::string generation_throughput_by_verification =
+        "\n generation_throughput_tokens_per_s( ";
+    for (auto const &group : generated_tokens_by_verification_tokens) {
+      int verification_tokens = group.first;
+      std::vector<int> const &generated_tokens = group.second;
+
+      // Get corresponding LLM step times for this verification token count
+      auto const &llm_times_it =
+          llm_times_by_verification_tokens.find(verification_tokens);
+      if (llm_times_it != llm_times_by_verification_tokens.end() &&
+          !llm_times_it->second.empty() && !generated_tokens.empty()) {
+        // Calculate average generated tokens
+        double avg_tokens = std::accumulate(generated_tokens.begin(),
+                                            generated_tokens.end(),
+                                            0.0) /
+                            generated_tokens.size();
+
+        // Calculate average LLM step time
+        std::vector<double> const &llm_times = llm_times_it->second;
+        double avg_llm_time =
+            std::accumulate(llm_times.begin(), llm_times.end(), 0.0) /
+            llm_times.size();
+
+        // Calculate generation throughput (avoid division by zero)
+        double throughput =
+            (avg_llm_time > 0) ? (avg_tokens / avg_llm_time) * 1000 : 0.0;
+
+        // Add to output string
+        generation_throughput_by_verification +=
+            std::to_string(verification_tokens) + ":" +
+            std::to_string(throughput) + "\n";
+      }
+    }
+    generation_throughput_by_verification += ")";
+    str += generation_throughput_by_verification;
 
     std::string mean_generated_tokens_per_step =
         "\n mean_generated_tokens_per_step( ";
@@ -3670,6 +3860,24 @@ void RequestManager::prune_token_tree() {
       add_tokens_toward_goodput(budget);
     }
   }
+  // Clear the priority queue in each requests
+  for (int request_index = 0; request_index < get_max_requests_per_batch();
+       ++request_index) {
+    if (!request_available[request_index]) {
+      continue;
+    }
+    RequestGuid guid = guid_of_requests[request_index];
+    Request &request = all_requests[guid];
+    assert(request.status == Request::RUNNING);
+    std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>
+        _prealloc_vector;
+    _prealloc_vector.reserve(BatchConfig::MAX_SPEC_TREE_TOKEN_NUM);
+    request.token_tree_nodes_acc_prob_pair_pq = std::priority_queue<
+        std::pair<std::shared_ptr<TokenTreeNode>, double>,
+        std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>,
+        SharedTokenTreeNodePtrDoubleLess>(SharedTokenTreeNodePtrDoubleLess(),
+                                          std::move(_prealloc_vector));
+  }
 }
 
 void RequestManager::prune_token_tree_equal() {
@@ -3691,6 +3899,14 @@ void RequestManager::prune_token_tree_equal() {
     if (budget > 0) {
       add_tokens_toward_goodput_per_request(budget, request_index);
     }
+    std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>
+        _prealloc_vector;
+    _prealloc_vector.reserve(BatchConfig::MAX_SPEC_TREE_TOKEN_NUM);
+    request.token_tree_nodes_acc_prob_pair_pq = std::priority_queue<
+        std::pair<std::shared_ptr<TokenTreeNode>, double>,
+        std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>,
+        SharedTokenTreeNodePtrDoubleLess>(SharedTokenTreeNodePtrDoubleLess(),
+                                          std::move(_prealloc_vector));
   }
 }
 
@@ -3711,6 +3927,23 @@ void RequestManager::prune_token_tree_greedy() {
 
   if (budget > 0) {
     add_tokens_toward_goodput(budget);
+  }
+  for (int request_index = 0; request_index < get_max_requests_per_batch();
+       ++request_index) {
+    if (!request_available[request_index]) {
+      continue;
+    }
+    RequestGuid guid = guid_of_requests[request_index];
+    Request &request = all_requests[guid];
+    assert(request.status == Request::RUNNING);
+    std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>
+        _prealloc_vector;
+    _prealloc_vector.reserve(BatchConfig::MAX_SPEC_TREE_TOKEN_NUM);
+    request.token_tree_nodes_acc_prob_pair_pq = std::priority_queue<
+        std::pair<std::shared_ptr<TokenTreeNode>, double>,
+        std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>,
+        SharedTokenTreeNodePtrDoubleLess>(SharedTokenTreeNodePtrDoubleLess(),
+                                          std::move(_prealloc_vector));
   }
 }
 
@@ -3802,25 +4035,6 @@ void RequestManager::add_tokens_toward_memory_occupancy(int budget) {
     }
     budget--;
   }
-
-  // Clear the priority queue in each requests
-  for (int request_index = 0; request_index < get_max_requests_per_batch();
-       ++request_index) {
-    if (!request_available[request_index]) {
-      continue;
-    }
-    RequestGuid guid = guid_of_requests[request_index];
-    Request &request = all_requests[guid];
-    assert(request.status == Request::RUNNING);
-    std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>
-        _prealloc_vector;
-    _prealloc_vector.reserve(BatchConfig::MAX_SPEC_TREE_TOKEN_NUM);
-    request.token_tree_nodes_acc_prob_pair_pq = std::priority_queue<
-        std::pair<std::shared_ptr<TokenTreeNode>, double>,
-        std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>,
-        SharedTokenTreeNodePtrDoubleLess>(SharedTokenTreeNodePtrDoubleLess(),
-                                          std::move(_prealloc_vector));
-  }
 }
 
 void RequestManager::add_tokens_toward_goodput(int budget) {
@@ -3878,25 +4092,6 @@ void RequestManager::add_tokens_toward_goodput(int budget) {
     }
     budget--;
   }
-
-  // Clear the priority queue in each requests
-  for (int request_index = 0; request_index < get_max_requests_per_batch();
-       ++request_index) {
-    if (!request_available[request_index]) {
-      continue;
-    }
-    RequestGuid guid = guid_of_requests[request_index];
-    Request &request = all_requests[guid];
-    assert(request.status == Request::RUNNING);
-    std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>
-        _prealloc_vector;
-    _prealloc_vector.reserve(BatchConfig::MAX_SPEC_TREE_TOKEN_NUM);
-    request.token_tree_nodes_acc_prob_pair_pq = std::priority_queue<
-        std::pair<std::shared_ptr<TokenTreeNode>, double>,
-        std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>,
-        SharedTokenTreeNodePtrDoubleLess>(SharedTokenTreeNodePtrDoubleLess(),
-                                          std::move(_prealloc_vector));
-  }
 }
 
 void RequestManager::add_tokens_toward_goodput_per_request(int budget,
@@ -3917,16 +4112,6 @@ void RequestManager::add_tokens_toward_goodput_per_request(int budget,
     node_ptr->included = true;
     budget--;
   }
-
-  // Clear the priority queue in the request
-  std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>
-      _prealloc_vector;
-  _prealloc_vector.reserve(BatchConfig::MAX_SPEC_TREE_TOKEN_NUM);
-  request.token_tree_nodes_acc_prob_pair_pq = std::priority_queue<
-      std::pair<std::shared_ptr<TokenTreeNode>, double>,
-      std::vector<std::pair<std::shared_ptr<TokenTreeNode>, double>>,
-      SharedTokenTreeNodePtrDoubleLess>(SharedTokenTreeNodePtrDoubleLess(),
-                                        std::move(_prealloc_vector));
 }
 
 std::ostream &operator<<(std::ostream &os, TokenTree const &token_tree) {

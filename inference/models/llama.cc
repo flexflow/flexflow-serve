@@ -195,34 +195,22 @@ void LLAMA::create_llama_model(FFModel &ff,
     token = token_ff_norm[0];
     Tensor ff_norm = token_ff_norm[1];
 
-    Tensor w1 = ff.dense(
-        ff_norm,
-        llama_config.intermediate_size,
-        AC_MODE_NONE,
-        false,
-        DT_NONE,
-        nullptr,
-        nullptr,
-        nullptr,
-        REG_MODE_NONE,
-        0.0f,
-        std::string("layers." + std::to_string(i) + ".mlp.gate_proj").c_str());
+    Tensor hidden_gate_and_up =
+        ff.dense(ff_norm,
+                 llama_config.intermediate_size * 2,
+                 AC_MODE_NONE,
+                 false,
+                 DT_NONE,
+                 nullptr,
+                 nullptr,
+                 nullptr,
+                 REG_MODE_NONE,
+                 0.0f,
+                 std::string("layers." + std::to_string(i) + ".mlp.gate_and_up")
+                     .c_str());
 
-    Tensor w3 = ff.dense(
-        ff_norm,
-        llama_config.intermediate_size,
-        AC_MODE_NONE,
-        false,
-        DT_NONE,
-        nullptr,
-        nullptr,
-        nullptr,
-        REG_MODE_NONE,
-        0.0f,
-        std::string("layers." + std::to_string(i) + ".mlp.up_proj").c_str());
-
-    Tensor multi =
-        ff.sigmoid_silu_multi(w1, w3, llama_config.intermediate_size);
+    Tensor multi = ff.sigmoid_silu_multi(hidden_gate_and_up,
+                                         llama_config.intermediate_size);
 
     w2 = ff.dense(
         multi,

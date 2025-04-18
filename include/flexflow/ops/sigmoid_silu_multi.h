@@ -10,15 +10,14 @@ class SigmoidSiluMultiMeta;
 class SigmoidSiluMulti : public Op {
 public:
   using Params = SigmoidSiluMultiParams;
-  using Input = std::pair<ParallelTensor, ParallelTensor>;
+  using Input = ParallelTensor;
   SigmoidSiluMulti(FFModel &model,
                    Params const &params,
-                   Input const &inputs,
+                   Input const &input,
                    char const *name = nullptr);
   SigmoidSiluMulti(FFModel &model,
                    LayerID const &_layer_guid,
-                   const ParallelTensor _input1,
-                   const ParallelTensor _input2,
+                   ParallelTensor const _input,
                    int _intermediate_size,
                    int _tensor_parallelism_degree,
                    char const *name = nullptr);
@@ -63,13 +62,11 @@ public:
   template <typename T>
   static void inference_kernel(SigmoidSiluMultiMeta const *m,
                                int num_elements,
-                               T const *input1_ptr,
-                               T const *input2_ptr,
+                               T const *input_ptr,
                                T *output_ptr,
                                ffStream_t stream);
   static void inference_kernel_wrapper(SigmoidSiluMultiMeta const *m,
-                                       GenericTensorAccessorR const &input1,
-                                       GenericTensorAccessorR const &input2,
+                                       GenericTensorAccessorR const &input,
                                        GenericTensorAccessorW const &output,
                                        int token_size);
 

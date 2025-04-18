@@ -276,6 +276,8 @@ struct ProfileInfo {
   std::vector<double> tree_operation_step_times;
   // Number of generated tokens at each step
   std::vector<int> generated_tokens_per_step;
+  // Number of proposed tokens at each step
+  std::vector<int> tokens_in_verification_per_step;
   // To calculate the E2E time of serving
   long long server_start_time = 0;
   long long server_end_time = 0;
@@ -453,6 +455,7 @@ private:
   // configuration parameters
   int max_requests_per_batch;
   int max_tokens_per_batch;
+  int config_max_token_per_batch;
   int max_tokens_per_ssm_batch;
   int max_tokens_per_prefilling_batch;
   int max_spec_tree_token_num;

@@ -46,9 +46,8 @@ bool operator==(SigmoidSiluMultiParams const &lhs,
          lhs.tensor_parallelism_degree == rhs.tensor_parallelism_degree;
 }
 
-bool SigmoidSiluMultiParams::is_valid(
-    std::pair<ParallelTensorShape, ParallelTensorShape> const &input) const {
-  return input.first.is_valid() && input.second.is_valid();
+bool SigmoidSiluMultiParams::is_valid(ParallelTensorShape const &input) const {
+  return input.is_valid();
 }
 
 SigmoidSiluMultiParams SigmoidSiluMulti::get_params() const {
@@ -62,43 +61,39 @@ SigmoidSiluMultiParams SigmoidSiluMulti::get_params() const {
   return params;
 }
 
-Tensor FFModel::sigmoid_silu_multi(const Tensor input1,
-                                   const Tensor input2,
+Tensor FFModel::sigmoid_silu_multi(Tensor const input,
                                    int intermediate_size,
                                    DataType data_type,
                                    char const *name) {
 
   // Check dims
-  assert(input1->num_dims == input2->num_dims);
-  for (int i = 0; i < input1->num_dims; i++) {
-    assert(input1->dims[i] == input2->dims[i]);
-  }
+  assert(input->dims[0] == intermediate_size * 2);
+
   // Tensor Data type
   if (data_type == DT_NONE) {
-    data_type = input1->data_type;
-    assert(input2->data_type == input1->data_type);
+    data_type = input->data_type;
   }
-  Tensor casted_input1 =
-      (data_type != input1->data_type)
-          ? cast(input1, data_type, "type cast for sigmoid_silu_multi")
-          : input1;
-  Tensor casted_input2 =
-      (data_type != input2->data_type)
-          ? cast(input2, data_type, "type cast for sigmoid_silu_multi")
-          : input2;
+  Tensor casted_input =
+      (data_type != input->data_type)
+          ? cast(input, data_type, "type cast for sigmoid_silu_multi")
+          : input;
 
   // Create layer
   Layer *ssm = new Layer(this,
                          OP_SIGMOID_SILU_MULTI,
                          data_type,
                          name,
-                         2 /*inputs*/,
+                         1 /*inputs*/,
                          0 /*weights*/,
                          1 /*outputs*/,
-                         casted_input1,
-                         casted_input2);
+                         casted_input);
+  int dims[MAX_TENSOR_DIM] = {0};
+  for (int i = 0; i < input->num_dims; i++) {
+    dims[i] = input->dims[i];
+  }
+  dims[0] = intermediate_size;
   ssm->outputs[0] = create_tensor_legion_ordering(
-      input1->num_dims, input1->dims, data_type, ssm, 0, false /*create_grad*/);
+      input->num_dims, dims, data_type, ssm, 0, false /*create_grad*/);
   ssm->add_int_property("intermediate_size", intermediate_size);
   ssm->add_int_property("tensor_parallelism_degree",
                         config.tensor_parallelism_degree);
@@ -118,50 +113,47 @@ Op *SigmoidSiluMulti::create_operator_from_layer(
   return new SigmoidSiluMulti(model,
                               layer->layer_guid,
                               inputs[0],
-                              inputs[1],
                               intermediate_size,
                               tensor_parallelism_degree,
                               layer->name);
 }
 
-SigmoidSiluMulti::SigmoidSiluMulti(
-    FFModel &model,
-    SigmoidSiluMultiParams const &params,
-    std::pair<ParallelTensor, ParallelTensor> const &inputs,
-    char const *name)
+SigmoidSiluMulti::SigmoidSiluMulti(FFModel &model,
+                                   SigmoidSiluMultiParams const &params,
+                                   ParallelTensor const &input,
+                                   char const *name)
     : SigmoidSiluMulti(model,
                        params.layer_guid,
-                       inputs.first,
-                       inputs.second,
+                       input,
                        params.intermediate_size,
                        params.tensor_parallelism_degree,
                        params.name) {}
 
 SigmoidSiluMulti::SigmoidSiluMulti(FFModel &model,
                                    LayerID const &_layer_guid,
-                                   const ParallelTensor _input1,
-                                   const ParallelTensor _input2,
+                                   ParallelTensor const _input,
                                    int _intermediate_size,
                                    int _tensor_parallelism_degree,
                                    char const *name)
     : Op(model,
          OP_SIGMOID_SILU_MULTI,
-         _input1->data_type,
+         _input->data_type,
          name,
-         2 /*inputs*/,
+         1 /*inputs*/,
          0 /*weights*/,
          1 /*outputs*/,
-         _input1,
-         _input2),
+         _input),
       intermediate_size(_intermediate_size),
       tensor_parallelism_degree(_tensor_parallelism_degree) {
   // overwrite layer_guid
   layer_guid = _layer_guid;
-  outputs[0] = model.create_parallel_tensor_legion_ordering(_input1->num_dims,
-                                                            _input1->dims,
-                                                            _input1->data_type,
-                                                            this,
-                                                            0 /*owner_idx*/);
+  ParallelDim dims[MAX_TENSOR_DIM];
+  for (int i = 0; i < _input->num_dims; i++) {
+    dims[i] = _input->dims[i];
+  }
+  dims[0].size = _intermediate_size;
+  outputs[0] = model.create_parallel_tensor_legion_ordering(
+      _input->num_dims, dims, _input->data_type, this, 0 /*owner_idx*/);
 }
 
 void SigmoidSiluMulti::init_inference(
@@ -185,27 +177,20 @@ void SigmoidSiluMulti::init_inference(
                          false /*must*/,
                          0 /*mapper_id*/,
                          machine_view_hash);
-  // input 1
+  // input
   launcher.add_region_requirement(RegionRequirement(batch_inputs[0]->part,
                                                     0 /*projection id*/,
                                                     READ_ONLY,
                                                     EXCLUSIVE,
                                                     batch_inputs[0]->region));
   launcher.add_field(0, FID_DATA);
-  // input 2
-  launcher.add_region_requirement(RegionRequirement(batch_inputs[1]->part,
-                                                    0 /*projection id*/,
-                                                    READ_ONLY,
-                                                    EXCLUSIVE,
-                                                    batch_inputs[1]->region));
-  launcher.add_field(1, FID_DATA);
   // output
   launcher.add_region_requirement(RegionRequirement(batch_outputs[0]->part,
                                                     0 /*projection id*/,
                                                     WRITE_ONLY,
                                                     EXCLUSIVE,
                                                     batch_outputs[0]->region));
-  launcher.add_field(2, FID_DATA);
+  launcher.add_field(1, FID_DATA);
   FutureMap fm = runtime->execute_index_space(ctx, launcher);
   fm.wait_all_results();
   set_opmeta_from_futuremap_inference(ff, fm, batch_outputs[0]);
@@ -226,36 +211,28 @@ void SigmoidSiluMulti::init(FFModel const &ff) {
                          false /*must*/,
                          0 /*mapper_id*/,
                          outputs[0]->machine_view.hash());
-  // input 1
+  // input
   launcher.add_region_requirement(RegionRequirement(inputs[0]->part,
                                                     0 /*projection id*/,
                                                     READ_ONLY,
                                                     EXCLUSIVE,
                                                     inputs[0]->region));
   launcher.add_field(0, FID_DATA);
-  // input 2
-  launcher.add_region_requirement(RegionRequirement(inputs[1]->part,
-                                                    0 /*projection id*/,
-                                                    READ_ONLY,
-                                                    EXCLUSIVE,
-                                                    inputs[1]->region));
-  launcher.add_field(1, FID_DATA);
   // output
   launcher.add_region_requirement(RegionRequirement(outputs[0]->part,
                                                     0 /*projection id*/,
                                                     WRITE_ONLY,
                                                     EXCLUSIVE,
                                                     outputs[0]->region));
-  launcher.add_field(2, FID_DATA);
+  launcher.add_field(1, FID_DATA);
   FutureMap fm = runtime->execute_index_space(ctx, launcher);
   fm.wait_all_results();
   set_opmeta_from_futuremap(ff, fm);
 }
 
 /*
-  regions[0](I): input 1
-  regions[1](I): input 2
-  regions[2](O): output
+  regions[0](I): input
+  regions[1](O): output
 */
 OpMeta *SigmoidSiluMulti::init_task(Task const *task,
                                     std::vector<PhysicalRegion> const &regions,
@@ -276,7 +253,6 @@ OpMeta *SigmoidSiluMulti::init_task(Task const *task,
                                                         ssm->intermediate_size,
                                                         intermediate_size);
   meta->input_type[0] = ssm->inputs[0]->data_type;
-  meta->input_type[1] = ssm->inputs[1]->data_type;
   meta->output_type[0] = ssm->outputs[0]->data_type;
   std::strcpy(meta->op_name, ssm->name);
   meta->layer_guid = ssm->layer_guid;
@@ -316,34 +292,26 @@ FutureMap SigmoidSiluMulti::inference(
                          0 /*mapper_id*/,
                          machine_view_hash);
   launcher.add_future(bc);
-  // input 1
+  // input
   launcher.add_region_requirement(RegionRequirement(batch_inputs[0]->part,
                                                     0 /*projection id*/,
                                                     READ_ONLY,
                                                     EXCLUSIVE,
                                                     batch_inputs[0]->region));
   launcher.add_field(0, FID_DATA);
-  // input 2
-  launcher.add_region_requirement(RegionRequirement(batch_inputs[1]->part,
-                                                    0 /*projection id*/,
-                                                    READ_ONLY,
-                                                    EXCLUSIVE,
-                                                    batch_inputs[1]->region));
-  launcher.add_field(1, FID_DATA);
   // output
   launcher.add_region_requirement(RegionRequirement(batch_outputs[0]->part,
                                                     0 /*projection id*/,
                                                     WRITE_ONLY,
                                                     EXCLUSIVE,
                                                     batch_outputs[0]->region));
-  launcher.add_field(2, FID_DATA);
+  launcher.add_field(1, FID_DATA);
   return runtime->execute_index_space(ctx, launcher);
 }
 
 /*
-  regions[0](I): input 1
-  regions[1](I): input 2
-  regions[2](O): output
+  regions[0](I): input
+  regions[1](O): output
 */
 void SigmoidSiluMulti::inference_task(
     Task const *task,
@@ -352,7 +320,7 @@ void SigmoidSiluMulti::inference_task(
     Runtime *runtime) {
 
   assert(task->regions.size() == regions.size());
-  assert(regions.size() == 3);
+  assert(regions.size() == 2);
 
   BatchConfig const *bc = BatchConfig::from_future(task->futures[0]);
   if (bc->num_tokens == 0) {
@@ -361,34 +329,26 @@ void SigmoidSiluMulti::inference_task(
 
   SigmoidSiluMultiMeta *m = *((SigmoidSiluMultiMeta **)task->local_args);
 
-  GenericTensorAccessorR input1 = helperGetGenericTensorAccessorRO(
+  GenericTensorAccessorR input = helperGetGenericTensorAccessorRO(
       m->input_type[0], regions[0], task->regions[0], FID_DATA, ctx, runtime);
-  GenericTensorAccessorR input2 = helperGetGenericTensorAccessorRO(
-      m->input_type[1], regions[1], task->regions[1], FID_DATA, ctx, runtime);
   GenericTensorAccessorW output = helperGetGenericTensorAccessorWO(
-      m->output_type[0], regions[2], task->regions[2], FID_DATA, ctx, runtime);
+      m->output_type[0], regions[1], task->regions[1], FID_DATA, ctx, runtime);
 
-  Domain input1_domain = runtime->get_index_space_domain(
+  Domain input_domain = runtime->get_index_space_domain(
       ctx, task->regions[0].region.get_index_space());
-  Domain input2_domain = runtime->get_index_space_domain(
-      ctx, task->regions[1].region.get_index_space());
   Domain output_domain = runtime->get_index_space_domain(
-      ctx, task->regions[2].region.get_index_space());
+      ctx, task->regions[1].region.get_index_space());
 
-  assert(input1_domain.get_volume() == input2_domain.get_volume());
-  assert(input1_domain.get_volume() == output_domain.get_volume());
-
-  assert(input1_domain == input2_domain);
-  assert(input1_domain == output_domain);
+  assert(input_domain.get_volume() == output_domain.get_volume() * 2);
 
   // use active number of tokens
   SigmoidSiluMulti::inference_kernel_wrapper(
-      m, input1, input2, output, bc->num_active_tokens());
+      m, input, output, bc->num_active_tokens());
   if (m->inference_debugging) {
     assert(task->index_point.get_dim() == 1);
     int shard_id = task->index_point.point_data[0];
     SigmoidSiluMulti::save_inference_tensors_to_file(
-        m, shard_id, bc, {input1, input2}, {}, {output});
+        m, shard_id, bc, {input}, {}, {output});
   }
 }
 
@@ -414,7 +374,7 @@ Node SigmoidSiluMulti::deserialize(FFModel &ff,
                                    Legion::Deserializer &dez,
                                    ParallelTensor inputs[],
                                    int num_inputs) {
-  assert(num_inputs == 2);
+  assert(num_inputs == 1);
   size_t id, transformer_layer_id, deserialized_model_id;
   int intermediate_size, tensor_parallelism_degree;
   dez.deserialize(id);
@@ -433,8 +393,7 @@ Node SigmoidSiluMulti::deserialize(FFModel &ff,
   params.intermediate_size = intermediate_size;
   params.tensor_parallelism_degree = tensor_parallelism_degree;
   strcpy(params.name, name);
-  return ff.get_or_create_node<SigmoidSiluMulti>({inputs[0], inputs[1]},
-                                                 params);
+  return ff.get_or_create_node<SigmoidSiluMulti>(inputs[0], params);
 }
 
 }; // namespace FlexFlow

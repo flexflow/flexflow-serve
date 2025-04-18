@@ -159,9 +159,8 @@ Tensor FFModel::groupquery_self_attention(
   int vParas = v_dim * hidden_size;
   int oParas = o_dim * (v_dim > 0 ? v_dim : hidden_size);
 
-  // allocate num_q_heads for key, value for replication
-  int weight_size = qParas * num_q_heads + kParas * num_q_heads +
-                    vParas * num_q_heads + oParas * num_q_heads;
+  int weight_size = qParas * num_q_heads + kParas * num_kv_heads +
+                    vParas * num_kv_heads + oParas * num_q_heads;
   int one_head_size = qParas + kParas + vParas + oParas;
 
   {
@@ -182,6 +181,7 @@ Tensor FFModel::groupquery_self_attention(
   }
   if (qkv_bias || final_bias) {
     // q, k, v, o
+    // TODO: eliminate the replication for key and value bias
     int qkv_bias_size = qk_dim * num_q_heads + (qk_dim + v_dim) * num_q_heads;
     int dims[1] = {(qkv_bias ? qkv_bias_size : 0) + (final_bias ? o_dim : 0)};
     li->weights[1] = create_weight_legion_ordering(1,
@@ -376,7 +376,7 @@ IncMultiHeadSelfAttention::IncMultiHeadSelfAttention(
     dims[0].size = dims[0].degree;
     dims[1] = inputs[0]->dims[num_dims - 1];
     dims[1].size = this->num_q_heads * (qParas + oParas) +
-                   this->num_q_heads * (kParas + vParas);
+                   this->num_kv_heads * (kParas + vParas);
     dims[1].is_replica_dim = false;
 
     if (quantization_type != DT_NONE) {
@@ -488,7 +488,7 @@ IncMultiHeadSelfAttention::IncMultiHeadSelfAttention(
     dims[0].size = dims[0].degree;
     dims[1] = inputs[0]->dims[num_dims - 1];
     dims[1].size = this->num_q_heads * (qParas + oParas) +
-                   this->num_q_heads * (kParas + vParas);
+                   this->num_kv_heads * (kParas + vParas);
     dims[1].is_replica_dim = false;
     // dims[2].size = this->num_q_heads * (qParas + oParas) + this->num_kv_heads
     // * (kParas + vParas);
