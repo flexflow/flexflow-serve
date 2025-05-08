@@ -171,6 +171,203 @@ bool lora_applies_to_this_layer(LoraLinearMeta *m,
 namespace Internal {
 
 template <typename DT>
+void inference_kernel_spatial_sharing(LoraLinearMeta *m,
+                                      BatchConfig const *bc,
+                                      DT const *input_ptr,
+                                      DT *output_ptr,
+                                      int in_dim,
+                                      int out_dim,
+                                      ffStream_t main_stream) {
+  // launch finetuning fwd tokens kernel if there are any finetuning fwd tokens
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_can_start, main_stream)); 
+    checkCUDA(cudaStreamWaitEvent(m->handle.peft_fwd_stream, m->handle.peft_fwd_can_start, 0));
+
+    checkCUDA(cublasSetStream(m->handle.peft_fwd_blas, m->handle.peft_fwd_stream));
+    checkCUDNN(cudnnSetStream(m->handle.peft_fwd_dnn, m->handle.peft_fwd_stream));
+    cudaDataType_t input_type = ff_to_cuda_datatype(m->input_type[0]);
+    cudaDataType_t output_type = ff_to_cuda_datatype(m->input_type[1]);
+    cudaDataType_t lr_actv_type = output_type;
+    assert(input_type == output_type);
+    cudaDataType_t weight_type = output_type;
+    cudaDataType_t compute_type = output_type;
+
+    int i = bc->finetuning_request_index();
+    std::string peft_model_config_str =
+        std::string(bc->requestsInfo[i].peft_model_config_str);
+    LoraLinearConfig lora_config =
+        LoraLinearConfig::deserialize_from_json_string(peft_model_config_str);
+    if (lora_applies_to_this_layer(m, lora_config)) {
+      // std::cout << "Lora layer activated!" << std::endl;
+      // std::cout << "Lora Config: " << peft_model_config_str << std::endl;
+      assert(lora_config.trainable == bc->requestsInfo[i].finetuning_request &&
+            "Trainable flag mismatch");
+      int num_peft_tokens = bc->requestsInfo[i].num_tokens_in_batch;
+      // assert(num_peft_tokens == bc->num_finetuning_fwd_tokens());
+      // int max_peft_tokens = bc->requestsInfo[i].max_length;
+      int first_token_offset = bc->requestsInfo[i].first_token_offset_in_batch;
+      LoraLinearWeight weight = m->peft_memory_manager->get_peft(
+          bc->requestsInfo[i].peft_model_id, lora_config);
+      void *intermediate_result_ptr = (bc->requestsInfo[i].finetuning_request)
+                                          ? weight.low_rank_activation
+                                          : m->handle.workSpace;
+      if (bc->requestsInfo[i].finetuning_request) {
+        checkCUDA(cudaMemcpyAsync(weight.input_activation,
+                                  input_ptr + first_token_offset * in_dim,
+                                  data_type_size(m->input_type[0]) *
+                                      num_peft_tokens * in_dim,
+                                  cudaMemcpyDeviceToDevice,
+                                  m->handle.peft_fwd_stream));
+      } else {
+        // use workspace to save intermediate result
+        assert(m->handle.workSpaceSize >= data_type_size(m->input_type[1]) *
+                                              num_peft_tokens * lora_config.rank);
+      }
+      DT alpha = 1.0f, beta = 0.0f;
+      // buffer = weight_first * input
+      // [rank, num_peft_tokens] = [in_dim, rank].T * [in_dim, num_peft_tokens]
+      checkCUDA(cublasGemmEx(m->handle.peft_fwd_blas,
+                            CUBLAS_OP_T,
+                            CUBLAS_OP_N,
+                            lora_config.rank,
+                            num_peft_tokens,
+                            in_dim,
+                            &alpha,
+                            weight.w0_ptr,
+                            weight_type,
+                            in_dim,
+                            input_ptr + first_token_offset * in_dim,
+                            input_type,
+                            in_dim,
+                            &beta,
+                            intermediate_result_ptr,
+                            lr_actv_type,
+                            lora_config.rank,
+                            compute_type,
+                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+      // output = weight_second * buffer
+      // [out_dim, num_peft_tokens] = [rank, out_dim].T * [rank, num_peft_tokens]
+      // Note that we use alpha in both places since we do
+      // an in-place update for LoraLinear
+      DT scaling_constant = (DT)(lora_config.lora_alpha / lora_config.rank);
+      checkCUDA(cublasGemmEx(m->handle.peft_fwd_blas,
+                            CUBLAS_OP_T,
+                            CUBLAS_OP_N,
+                            out_dim,
+                            num_peft_tokens,
+                            lora_config.rank,
+                            &scaling_constant,
+                            weight.w1_ptr,
+                            weight_type,
+                            lora_config.rank,
+                            intermediate_result_ptr,
+                            lr_actv_type,
+                            lora_config.rank,
+                            &alpha,
+                            output_ptr + first_token_offset * out_dim,
+                            output_type,
+                            out_dim,
+                            compute_type,
+                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    }
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_done, m->handle.peft_fwd_stream));
+  }
+
+  // launch inference kernel if there are inference tokens
+  if (bc->num_inference_tokens() > 0) {
+    
+    checkCUDA(cublasSetStream(m->handle.blas, main_stream));
+    checkCUDNN(cudnnSetStream(m->handle.dnn, main_stream));
+    cudaDataType_t input_type = ff_to_cuda_datatype(m->input_type[0]);
+    cudaDataType_t output_type = ff_to_cuda_datatype(m->input_type[1]);
+    cudaDataType_t lr_actv_type = output_type;
+    assert(input_type == output_type);
+    cudaDataType_t weight_type = output_type;
+    cudaDataType_t compute_type = output_type;
+
+    for (int i = 0; i < bc->max_requests_per_batch(); i++) {
+      if (bc->request_completed[i] ||
+          bc->requestsInfo[i].peft_model_id == PEFTModelID::NO_ID ||
+          bc->requestsInfo[i].finetuning_request) {
+        continue;
+      }
+      std::string peft_model_config_str =
+          std::string(bc->requestsInfo[i].peft_model_config_str);
+      LoraLinearConfig lora_config =
+          LoraLinearConfig::deserialize_from_json_string(peft_model_config_str);
+      if (!lora_applies_to_this_layer(m, lora_config)) {
+        continue;
+      }
+      // std::cout << "Lora layer activated!" << std::endl;
+      // std::cout << "Lora Config: " << peft_model_config_str << std::endl;
+      assert(!lora_config.trainable && "Trainable flag mismatch");
+      int num_peft_tokens = bc->requestsInfo[i].num_tokens_in_batch;
+      // assert(num_peft_tokens == bc->num_finetuning_fwd_tokens());
+      // int max_peft_tokens = bc->requestsInfo[i].max_length;
+      int first_token_offset = bc->requestsInfo[i].first_token_offset_in_batch;
+      LoraLinearWeight weight = m->peft_memory_manager->get_peft(
+          bc->requestsInfo[i].peft_model_id, lora_config);
+      void *intermediate_result_ptr = m->handle.workSpace;
+      
+      // use workspace to save intermediate result
+      assert(m->handle.workSpaceSize >= data_type_size(m->input_type[1]) *
+                                            num_peft_tokens * lora_config.rank);
+      
+      DT alpha = 1.0f, beta = 0.0f;
+      // buffer = weight_first * input
+      // [rank, num_peft_tokens] = [in_dim, rank].T * [in_dim, num_peft_tokens]
+      checkCUDA(cublasGemmEx(m->handle.blas,
+                            CUBLAS_OP_T,
+                            CUBLAS_OP_N,
+                            lora_config.rank,
+                            num_peft_tokens,
+                            in_dim,
+                            &alpha,
+                            weight.w0_ptr,
+                            weight_type,
+                            in_dim,
+                            input_ptr + first_token_offset * in_dim,
+                            input_type,
+                            in_dim,
+                            &beta,
+                            intermediate_result_ptr,
+                            lr_actv_type,
+                            lora_config.rank,
+                            compute_type,
+                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+      // output = weight_second * buffer
+      // [out_dim, num_peft_tokens] = [rank, out_dim].T * [rank, num_peft_tokens]
+      // Note that we use alpha in both places since we do
+      // an in-place update for LoraLinear
+      DT scaling_constant = (DT)(lora_config.lora_alpha / lora_config.rank);
+      checkCUDA(cublasGemmEx(m->handle.blas,
+                            CUBLAS_OP_T,
+                            CUBLAS_OP_N,
+                            out_dim,
+                            num_peft_tokens,
+                            lora_config.rank,
+                            &scaling_constant,
+                            weight.w1_ptr,
+                            weight_type,
+                            lora_config.rank,
+                            intermediate_result_ptr,
+                            lr_actv_type,
+                            lora_config.rank,
+                            &alpha,
+                            output_ptr + first_token_offset * out_dim,
+                            output_type,
+                            out_dim,
+                            compute_type,
+                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    }
+  }
+
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaStreamWaitEvent(main_stream, m->handle.peft_fwd_done, 0));
+  }
+}
+
+template <typename DT>
 void inference_kernel(LoraLinearMeta *m,
                       BatchConfig const *bc,
                       DT const *input_ptr,
@@ -313,8 +510,8 @@ void peft_bwd_kernel(Context ctx,
                      int in_dim,
                      int out_dim,
                      ffStream_t stream) {
-  checkCUDA(cublasSetStream(m->handle.peft_blas, stream));
-  checkCUDNN(cudnnSetStream(m->handle.peft_dnn, stream));
+  checkCUDA(cublasSetStream(m->handle.peft_bwd_blas, stream));
+  checkCUDNN(cudnnSetStream(m->handle.peft_bwd_dnn, stream));
   cudaDataType_t input_type = ff_to_cuda_datatype(m->input_type[0]);
   cudaDataType_t output_type = ff_to_cuda_datatype(m->output_type[0]);
   assert(input_type == output_type);
@@ -363,7 +560,7 @@ void peft_bwd_kernel(Context ctx,
           weight.low_rank_activation, {lora_config.rank, num_peft_tokens});
       torch::save(tensor, filename);
     }
-    checkCUDA(cublasGemmEx(m->handle.peft_blas,
+    checkCUDA(cublasGemmEx(m->handle.peft_bwd_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_T,
                            lora_config.rank,
@@ -388,7 +585,7 @@ void peft_bwd_kernel(Context ctx,
   // low_rank_activation
   {
     DT alpha = 1.0f, beta = 0.0f;
-    checkCUDA(cublasGemmEx(m->handle.peft_blas,
+    checkCUDA(cublasGemmEx(m->handle.peft_bwd_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_N,
                            lora_config.rank,
@@ -415,7 +612,7 @@ void peft_bwd_kernel(Context ctx,
     DT beta = (bc->requestsInfo[i].optimizer_tasks.reset_gradients_to_zero)
                   ? 0.0f
                   : 1.0f;
-    checkCUDA(cublasGemmEx(m->handle.peft_blas,
+    checkCUDA(cublasGemmEx(m->handle.peft_bwd_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_T,
                            in_dim,
@@ -440,7 +637,7 @@ void peft_bwd_kernel(Context ctx,
   if (input_grad_ptr != nullptr) {
     DT alpha = 1.0f;
     DT beta = m->reset_input_grads[0] ? 0.0f : 1.0f;
-    checkCUDA(cublasGemmEx(m->handle.peft_blas,
+    checkCUDA(cublasGemmEx(m->handle.peft_bwd_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_N,
                            in_dim,

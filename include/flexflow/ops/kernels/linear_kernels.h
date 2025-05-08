@@ -58,8 +58,7 @@ void inference_kernel_wrapper(LinearMeta *m,
                               void const *filter_ptr,
                               void const *bias_ptr,
                               int in_dim,
-                              int out_dim,
-                              int batch_size);
+                              int out_dim);
 void peft_bwd_kernel_wrapper(LinearMeta const *m,
                              BatchConfig const *bc,
                              void *input_grad_ptr,
@@ -83,13 +82,13 @@ bool use_activation(ActiMode mode);
 namespace Internal {
 template <typename DT>
 void inference_kernel(LinearMeta const *m,
+                      BatchConfig const *bc,
                       void const *input_ptr,
                       void *output_ptr,
-                      void const *filter_ptr,
+                      void const *weight_ptr,
                       void const *bias_ptr,
                       int in_dim,
                       int out_dim,
-                      int batch_size,
                       ffStream_t stream);
 template <typename DT>
 void store_peft_activations(LinearMeta const *m,

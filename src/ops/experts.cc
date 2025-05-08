@@ -592,7 +592,6 @@ OpMeta *Experts::init_task(Task const *task,
   ExpertsMeta *m = new ExpertsMeta(handle, exp);
   m->profiling = exp->profiling;
   m->inference_debugging = exp->inference_debugging;
-  m->enable_peft_finetuning = exp->enable_peft_finetuning;
   std::strcpy(m->op_name, exp->name);
   m->layer_guid = exp->layer_guid;
   return m;

@@ -19,10 +19,10 @@ public:
               MemoryAllocator &gpu_mem_allocator);
 #if defined(FF_USE_CUDA) || defined(FF_USE_HIP_CUDA)
   cudnnTensorDescriptor_t inputTensor;
-  cudnnTensorDescriptor_t outputTensor;
+  cudnnTensorDescriptor_t outputTensor, outputTensorPeftFwd;
 #else
   miopenTensorDescriptor_t inputTensor;
-  miopenTensorDescriptor_t outputTensor;
+  miopenTensorDescriptor_t outputTensor, outputTensorPeftFwd;
 #endif
   int dim;
   // PEFT related fields

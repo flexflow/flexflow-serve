@@ -128,7 +128,7 @@ def get_configs():
             "offload_reserve_space_size": 8 * 1024, # 8GB
             "use_4bit_quantization": False,
             "use_8bit_quantization": False,
-            "enable_peft": True,
+            "peft_support_mode": ff.PeftSupportMode.COSERVING,
             "profiling": False,
             "benchmarking": False,
             "inference_debugging": False,
@@ -187,7 +187,7 @@ async def startup_event():
         num_kv_cache_slots=configs_dict.get("num_kv_cache_slots", -1),
         max_concurrent_adapters=configs_dict.get("max_concurrent_adapters", 1)
         + 1,  # +1 for the finetuning request
-        enable_peft_finetuning=True,
+        peft_support_mode=ff.PeftSupportMode.COSERVING,
     )
     llm.start_server()
 

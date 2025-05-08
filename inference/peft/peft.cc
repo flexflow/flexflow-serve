@@ -46,7 +46,7 @@ void parse_input_args(char **argv,
                       bool &use_full_precision,
                       bool &verbose,
                       bool &do_sample,
-                      bool &enable_peft,
+                      PeftSupportMode &peft_support_mode,
                       float &temperature,
                       float &topp,
                       int &max_requests_per_batch,
@@ -65,8 +65,32 @@ void parse_input_args(char **argv,
       }
       continue;
     }
-    if (!strcmp(argv[i], "-enable-peft")) {
-      enable_peft = true;
+    if (!strcmp(argv[i], "--peft-support-mode")) {
+      std::string mode = argv[++i];
+      // Convert to lowercase for comparison
+      for (char &c : mode) {
+        c = std::tolower(c);
+      }
+      if (mode == "disabled") {
+        peft_support_mode = PEFT_DISABLED;
+      } else if (mode == "inference_only" || mode == "inference-only") {
+        peft_support_mode = PEFT_INFERENCE_ONLY;
+      } else if (mode == "coserving") {
+        peft_support_mode = COSERVING;
+      } else if (mode == "temporal_sharing" || mode == "temporal-sharing") {
+        peft_support_mode = TEMPORAL_SHARING;
+      } else if (mode == "spatial_sharing" || mode == "spatial-sharing") {
+        peft_support_mode = SPATIAL_SHARING;
+      } else if (mode == "spatial_sharing_limited" || mode == "spatial-sharing-limited") {
+        peft_support_mode = SPATIAL_SHARING_LIMITED;
+      } else if (mode == "temporal_sharing_limited" || mode == "temporal-sharing-limited") {
+        peft_support_mode = TEMPORAL_SHARING_LIMITED;
+      } else if (mode == "spatial_sharing_separate_tasks" || mode == "spatial-sharing-separate-tasks") {
+        peft_support_mode = SPATIAL_SHARING_SEPARATE_TASKS;
+      } else {
+        std::cerr << "Unknown peft support mode: " << mode << std::endl;
+        assert(false && "Invalid peft support mode");
+      }
       continue;
     }
     if (!strcmp(argv[i], "-peft-model")) {
@@ -202,14 +226,13 @@ void FlexFlow::top_level_task(Task const *task,
   bool use_full_precision = false;
   bool verbose = false;
   bool do_sample = false;
-  bool enable_peft = false;
+  ffconfig.peft_support_mode = PEFT_INFERENCE_ONLY;
   float temperature = 0.0f;
   float topp = 0.0f;
   int max_requests_per_batch = 1;
   int max_tokens_per_batch = 128;
   int max_sequence_length = 256;
   int max_training_epochs = 2;
-  bool enable_peft_finetuning = true;
   int num_layers_per_finetuning_step = -1;
   bool run_warmup = false;
   int num_kv_cache_slots = -1;
@@ -225,7 +248,7 @@ void FlexFlow::top_level_task(Task const *task,
                    use_full_precision,
                    verbose,
                    do_sample,
-                   enable_peft,
+                   ffconfig.peft_support_mode,
                    temperature,
                    topp,
                    max_requests_per_batch,
@@ -243,8 +266,9 @@ void FlexFlow::top_level_task(Task const *task,
   assert(ffconfig.data_parallelism_degree * ffconfig.tensor_parallelism_degree *
              ffconfig.pipeline_parallelism_degree ==
          ffconfig.numNodes * ffconfig.workersPerNode);
-  enable_peft_finetuning = file_paths.dataset_file_path.empty() ? false : true;
-  ffconfig.enable_peft_finetuning = enable_peft_finetuning;
+  if (!file_paths.dataset_file_path.empty()) {
+    ffconfig.peft_support_mode = COSERVING;
+  }
 
   std::string config_filepath = join_path(
       {file_paths.cache_folder_path, "configs", llm_model_name, "config.json"});
@@ -261,14 +285,14 @@ void FlexFlow::top_level_task(Task const *task,
               << std::endl;
     assert(false);
   }
-  if (!enable_peft) {
+  if (!peft_enabled(ffconfig.peft_support_mode)) {
     std::cerr << "Running PEFT script with PEFT not enabled" << std::endl;
     assert(false);
   }
-  if (enable_peft && peft_model_name.empty()) {
+  if (peft_enabled(ffconfig.peft_support_mode) && peft_model_name.empty()) {
     std::cout << "PEFT enabled, but no PEFT model id passed" << std::endl;
     assert(false);
-  } else if (!enable_peft && !peft_model_name.empty()) {
+  } else if (!peft_enabled(ffconfig.peft_support_mode) && !peft_model_name.empty()) {
     std::cout << "PEFT model id passed, but PEFT is not enabled" << std::endl;
     assert(false);
   }
@@ -326,13 +350,13 @@ void FlexFlow::top_level_task(Task const *task,
           : LoraLinearConfig(file_paths.cache_folder_path, peft_model_name);
 
   LoraOptimizerConfig *optim_config = nullptr;
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(ffconfig.peft_support_mode)) {
     // float sgd_learning_rate = 2e-1;
     float sgd_learning_rate = 0.001f;
     optim_config = new LoraSGDOptimizerConfig(sgd_learning_rate);
   }
   LoraLinearConfig peft_config_finetuning =
-      !enable_peft_finetuning
+      !peft_finetuning_enabled(ffconfig.peft_support_mode)
           ? LoraLinearConfig::EmptyConfig
           : LoraLinearConfig(file_paths.cache_folder_path,
                              peft_model_name,
@@ -347,16 +371,16 @@ void FlexFlow::top_level_task(Task const *task,
   rm->set_verbose(verbose);
   rm->set_max_requests_per_batch(
       max_requests_per_batch +
-      (int)enable_peft_finetuning); // add one slot for finetuning if needed
+      (int)peft_finetuning_enabled(ffconfig.peft_support_mode)); // add one slot for finetuning if needed
   // rm->set_max_concurrent_adapters(max_requests_per_batch +
-  //                                 (int)enable_peft_finetuning);
+  //                                 (int)peft_finetuning_enabled(ffconfig.peft_support_mode));
   rm->set_max_concurrent_adapters(1);
   rm->set_max_tokens_per_batch(max_tokens_per_batch);
   rm->set_max_sequence_length(max_sequence_length);
   rm->register_tokenizer(
       model_type, bos_token_id, eos_token_ids, tokenizer_filepath);
   rm->register_output_filepath(file_paths.output_file_path);
-  rm->set_enable_peft_finetuning(enable_peft_finetuning);
+  rm->set_peft_support_mode(ffconfig.peft_support_mode);
 
   FFModel model(ffconfig, ffconfig.cpu_offload);
   model.set_num_kv_cache_pages(compute_num_kv_cache_pages_needed(
@@ -408,10 +432,10 @@ void FlexFlow::top_level_task(Task const *task,
 
   // Add PEFT adapter(s)
   PEFTModelID *peft_model_id = nullptr, *peft_model_id_finetuning = nullptr;
-  if (!peft_model_name.empty() && !enable_peft_finetuning) {
+  if (!peft_model_name.empty() && !peft_finetuning_enabled(ffconfig.peft_support_mode)) {
     peft_model_id = model.register_peft_adapter(peft_config);
   }
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(ffconfig.peft_support_mode)) {
     peft_model_id_finetuning =
         model.register_peft_adapter(peft_config_finetuning);
   }
@@ -453,7 +477,7 @@ void FlexFlow::top_level_task(Task const *task,
     }
 
     // Add fine-tuning request
-    if (enable_peft_finetuning) {
+    if (peft_finetuning_enabled(ffconfig.peft_support_mode)) {
       assert(!file_paths.dataset_file_path.empty() &&
              "Dataset file path is required for fine-tuning.");
       printf("Finetuning request with dataset %s\n",

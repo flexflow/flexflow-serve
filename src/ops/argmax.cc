@@ -248,7 +248,6 @@ OpMeta *ArgMax::init_task(Task const *task,
                                  gpu_mem_allocator);
   m->profiling = s->profiling;
   m->inference_debugging = s->inference_debugging;
-  m->enable_peft_finetuning = s->enable_peft_finetuning;
   m->beam_search = s->beam_search;
   std::strcpy(m->op_name, s->name);
   m->layer_guid = s->layer_guid;
@@ -355,8 +354,7 @@ BeamInferenceResult
   GenericTensorAccessorW parent = helperGetGenericTensorAccessorWO(
       DT_INT32, regions[2], task->regions[2], FID_DATA, ctx, runtime);
   float loss = 0.0f;
-  ArgMax::forward_kernel_wrapper(
-      m, bc, input, indices, parent, batch_size, &loss);
+  ArgMax::inference_kernel_wrapper(m, bc, input, indices, parent, &loss);
   BeamInferenceResult ir;
   copy_tensor_dev_to_host<BatchConfig::TokenId>(
       indices.get_int32_ptr(), ir.token_ids, batch_size);
@@ -397,8 +395,7 @@ InferenceResult
   int batch_size = bc->num_active_tokens();
   float loss = 0.0f;
 
-  ArgMax::forward_kernel_wrapper(
-      m, bc, input, indices, parent, batch_size, &loss);
+  ArgMax::inference_kernel_wrapper(m, bc, input, indices, parent, &loss);
 
   InferenceResult ir;
   ir.finetuning_loss = loss;

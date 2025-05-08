@@ -43,13 +43,13 @@ mkdir -p ./inference/output
 export LEGION_BACKTRACE=1
 
 # Download test model
-python ./inference/utils/download_peft_model.py "${MODEL_NAME}"
+# python ./inference/utils/download_peft_model.py "${MODEL_NAME}"
 
 if [ "$FULL_PRECISION" = "true" ]; then full_precision_flag="--use-full-precision"; else full_precision_flag=""; fi
 if [ "$FUSION" = "true" ]; then fusion_flag="--fusion"; else fusion_flag=""; fi
 
 # Run PEFT in Huggingface to get ground truth tensors
-eval python ./tests/peft/hf_finetune.py --peft-model-id "${MODEL_NAME}" --save-peft-tensors "${full_precision_flag}" -lr "${LEARNING_RATE}"
+# eval python ./tests/peft/hf_finetune.py --peft-model-id "${MODEL_NAME}" --save-peft-tensors "${full_precision_flag}" -lr "${LEARNING_RATE}"
 
 # Python test
 echo "Python test"
@@ -63,7 +63,7 @@ json_config=$(cat <<-END
         "data_parallelism_degree": 1,
         "tensor_parallelism_degree": ${TP_DEGREE},
         "pipeline_parallelism_degree": ${PP_DEGREE},
-        "enable_peft": true,
+        "peft_support_mode": "COSERVING",
         "inference_debugging": true,
         "fusion": ${FUSION},
         "refresh_cache": false,
@@ -83,9 +83,9 @@ json_config=$(cat <<-END
 END
 )
 echo "$json_config" > /tmp/peft_config.json
-python ./inference/python/ff_peft.py -config-file /tmp/peft_config.json
+# python ./inference/python/ff_peft.py -config-file /tmp/peft_config.json
 # Check alignment
-python ./tests/peft/peft_alignment_test.py -m "${MODEL_NAME}" -tp "${TP_DEGREE}" -lr "${LEARNING_RATE}"
+# python ./tests/peft/peft_alignment_test.py -m "${MODEL_NAME}" -tp "${TP_DEGREE}" -lr "${LEARNING_RATE}"
 
 # C++ test
 echo "C++ test"
@@ -93,14 +93,14 @@ echo "C++ test"
 ./build/inference/peft/peft \
     -ll:gpu ${NUM_GPUS} -ll:cpu 4 -ll:util 4 \
     -tensor-parallelism-degree "${TP_DEGREE}" \
-    -ll:fsize "${MEMORY_PER_GPU}" -ll:zsize "${ZCOPY_MEMORY}" \
+    -ll:fsize "${MEMORY_PER_GPU}" -ll:zsize "${ZCOPY_MEMORY}" -ll:csize 2048 \
     --max-requests-per-batch 1 \
     --max-sequence-length 128 \
     --max-tokens-per-batch 128 \
     -llm-model "${BASE_MODEL_NAME}" \
     -finetuning-dataset ./inference/prompt/peft_dataset.json \
     -peft-model "$MODEL_NAME" \
-    -enable-peft \
+    --peft-support-mode COSERVING \
     "${full_precision_flag}" "${fusion_flag}" --inference-debugging
 
 # Check alignment

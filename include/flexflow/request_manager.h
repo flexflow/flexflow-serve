@@ -168,6 +168,11 @@ public:
     SERVING = 1002,
     TERMINATED = 1003,
   };
+  enum PeftTemporalSharingState {
+    INFERENCE = 0,
+    FINETUNING_FWD = 1,
+    FINETUNING_BWD = 2,
+  };
   using TokenId = BatchConfig::TokenId;
 
   RequestManager();
@@ -190,7 +195,8 @@ public:
   void set_max_sequence_length(int max_seq_length);
 
   void push_spec_infer_tree_width(int tree_width);
-  void set_enable_peft_finetuning(bool enable_peft_finetuning_);
+  void set_peft_support_mode(PeftSupportMode peft_support_mode_);
+  void update_peft_temporal_sharing_state(void);
   void set_inference_finished(bool finished = true);
   int register_ssm_model(FFModel *model);
   void register_tokenizer(ModelType model_type,
@@ -209,6 +215,9 @@ public:
   int get_num_transformer_layers();
   void set_num_layers_per_finetuning_step(int num_layers_per_finetuning_step);
   int get_num_layers_per_finetuning_step();
+  void set_temporal_sharing_frequency(int temporal_sharing_frequency);
+  int get_temporal_sharing_frequency();
+
   void initBitMask(BatchConfig::BitMask &bitmask, int initLength);
   void appendPendingRequest(BatchConfig::BitMask &bitmask, int initLength);
   void appendBitMask(BatchConfig::BitMask &bitmask,
@@ -289,6 +298,9 @@ public:
   BatchConfig prepare_next_bwd_batch(BatchConfig &new_bc);
   BatchConfig prepare_next_fwd_batch(BatchConfig const &old_bc,
                                      InferenceResult const &result);
+  void add_inference_work_if_needed(BatchConfig &new_bc,
+                                    BatchConfig const &old_bc);
+  void check_new_bc(BatchConfig const &new_bc);
   BatchConfigFuture
       prepare_next_batch(BatchConfigFuture const &old_bc,
                          InferenceResultFuture const &result,
@@ -407,10 +419,15 @@ private:
   int max_lora_rank = 32;
   int max_concurrent_adapters = 0;
   // peft benchmarking
-  bool enable_peft_finetuning = false;
+  PeftSupportMode peft_support_mode = PEFT_DISABLED;
+  PeftTemporalSharingState peft_temporal_sharing_state =
+      PeftTemporalSharingState::INFERENCE;
+  int peft_temporal_sharing_inf_step = 0;
+  BatchConfig ts_saved_old_batch;
   bool inference_finished = false;
   int num_transformer_layers = 0;
   int num_layers_per_finetuning_step = 0;
+  int temporal_sharing_frequency = 10;
 
   // tree width in each speculative step, if not specified 1
   std::vector<int> spec_infer_tree_width;

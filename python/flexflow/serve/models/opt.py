@@ -84,7 +84,7 @@ class FlexFlowOPT(FlexFlowModel):
         batch_tensor_num_tokens = self.rm.get_max_tokens_per_batch()
         if is_spec:
             batch_tensor_num_tokens = self.rm.get_max_verify_tokens_per_batch()
-        elif self.ffconfig.enable_peft_finetuning:
+        elif peft_finetuning_enabled(self.ffconfig.peft_support_mode):
             batch_tensor_num_tokens = self.rm.get_max_sequence_length()
 
         tokens_dims = [batch_tensor_num_tokens, 1]
@@ -283,7 +283,7 @@ class FlexFlowOPT(FlexFlowModel):
                 softmax = self.ffmodel.softmax(lm_head, -1)
                 output = self.ffmodel.argmax(softmax, False)
 
-        if self.ffconfig.enable_peft:
+        if peft_enabled(self.ffconfig.peft_support_mode):
             # TODO: add attention projections
             self.ffmodel.add_lora_layers(["fc1", "fc2"])
 

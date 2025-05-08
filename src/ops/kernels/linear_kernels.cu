@@ -50,7 +50,7 @@ LinearMeta::LinearMeta(FFHandler handler,
   // peft activation
   size_t out_dim =
       li->outputs[0]->dims[0].size / li->outputs[0]->dims[0].degree;
-  if (enable_peft_finetuning &&
+  if (peft_finetuning_enabled(peft_support_mode) &&
       (activation == AC_MODE_RELU || activation == AC_MODE_SIGMOID)) {
     // Allocate space for storing the output activations for PEFT finetuning
     // during inference
@@ -87,7 +87,7 @@ LinearMeta::LinearMeta(FFHandler handler,
   } else {
     one_ptr = nullptr;
   }
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(peft_support_mode)) {
     output_activation_buffer =
         gpu_mem_allocator.allocate_instance_untyped(allocated_peft_buffer_size);
   } else {
@@ -178,8 +178,7 @@ void inference_kernel_wrapper(LinearMeta *m,
                               void const *weight_ptr,
                               void const *bias_ptr,
                               int in_dim,
-                              int out_dim,
-                              int batch_size) {
+                              int out_dim) {
   cudaStream_t stream;
   checkCUDA(get_legion_stream(&stream));
   cudaEvent_t t_start, t_end;
@@ -190,14 +189,13 @@ void inference_kernel_wrapper(LinearMeta *m,
   }
 
   if (m->input_type[0] == DT_FLOAT) {
-    Internal::inference_kernel<float>(m,
+    Internal::inference_kernel<float>(m,bc,
                                       input_ptr,
                                       output_ptr,
                                       weight_ptr,
                                       bias_ptr,
                                       in_dim,
                                       out_dim,
-                                      batch_size,
                                       stream);
     if ((m->activation == AC_MODE_RELU || m->activation == AC_MODE_SIGMOID) &&
         bc->num_finetuning_fwd_requests() > 0) {
@@ -205,14 +203,13 @@ void inference_kernel_wrapper(LinearMeta *m,
           m, bc, out_dim, static_cast<float *>(output_ptr), stream);
     }
   } else if (m->input_type[0] == DT_HALF) {
-    Internal::inference_kernel<half>(m,
+    Internal::inference_kernel<half>(m,bc,
                                      input_ptr,
                                      output_ptr,
                                      weight_ptr,
                                      bias_ptr,
                                      in_dim,
                                      out_dim,
-                                     batch_size,
                                      stream);
     if ((m->activation == AC_MODE_RELU || m->activation == AC_MODE_SIGMOID) &&
         bc->num_finetuning_fwd_requests() > 0) {
@@ -307,15 +304,211 @@ __global__ void AddBiasWithReLU(DT *output_ptr,
 }
 
 template <typename DT>
+void inference_kernel_spatial_sharing(LinearMeta const *m,
+                                      BatchConfig const *bc,
+                                      void const *input_ptr,
+                                      void *output_ptr,
+                                      void const *weight_ptr,
+                                      void const *bias_ptr,
+                                      int in_dim,
+                                      int out_dim,
+                                      ffStream_t main_stream) {
+  
+  // launch finetuning fwd tokens kernel if there are any finetuning fwd tokens
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_can_start, main_stream)); 
+    checkCUDA(cudaStreamWaitEvent(m->handle.peft_fwd_stream, m->handle.peft_fwd_can_start, 0));
+
+    checkCUDA(cublasSetStream(m->handle.peft_fwd_blas, m->handle.peft_fwd_stream));
+    checkCUDNN(cudnnSetStream(m->handle.peft_fwd_dnn, m->handle.peft_fwd_stream));
+    DT alpha = 1.0f, beta = 0.0f;
+    cudaDataType_t input_type = ff_to_cuda_datatype(m->input_type[0]);
+    cudaDataType_t weight_type = ff_to_cuda_datatype(m->weight_type[0]);
+    cudaDataType_t output_type = ff_to_cuda_datatype(m->output_type[0]);
+    assert(input_type == weight_type && weight_type == output_type);
+    cudaDataType_t compute_type = output_type;
+    checkCUDA(cublasGemmEx(m->handle.peft_fwd_blas,
+                          CUBLAS_OP_T,
+                          CUBLAS_OP_N,
+                          out_dim,
+                          bc->num_finetuning_fwd_tokens(),
+                          in_dim,
+                          &alpha,
+                          weight_ptr,
+                          weight_type,
+                          in_dim,
+                          static_cast<DT const*>(input_ptr) + in_dim * bc->num_inference_tokens(),
+                          input_type,
+                          in_dim,
+                          &beta,
+                          static_cast<DT*>(output_ptr) + out_dim * bc->num_inference_tokens(),
+                          output_type,
+                          out_dim,
+                          compute_type,
+                          CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+    // use_bias = True
+    if (bias_ptr != NULL) {
+      // fuse bias and relu
+      if (m->activation == AC_MODE_RELU) {
+        int parallelism = out_dim * bc->num_finetuning_fwd_tokens();
+        AddBiasWithReLU<<<GET_BLOCKS(parallelism), CUDA_NUM_THREADS, 0, m->handle.peft_fwd_stream>>>(
+            static_cast<DT*>(output_ptr) + out_dim * bc->num_inference_tokens(),
+            static_cast<DT const *>(bias_ptr),
+            out_dim,
+            bc->num_finetuning_fwd_tokens());
+        return;
+      }
+      checkCUDA(cublasGemmEx(m->handle.peft_fwd_blas,
+                            CUBLAS_OP_T,
+                            CUBLAS_OP_N,
+                            out_dim,
+                            bc->num_finetuning_fwd_tokens(),
+                            1,
+                            &alpha,
+                            bias_ptr,
+                            weight_type,
+                            1,
+                            static_cast<DT *>(m->one_ptr),
+                            weight_type,
+                            1,
+                            &alpha,
+                            static_cast<DT*>(output_ptr) + out_dim * bc->num_inference_tokens(),
+                            output_type,
+                            out_dim,
+                            compute_type,
+                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    }
+    if (use_activation(m->activation)) {
+      checkCUDNN(cudnnActivationForward(m->handle.peft_fwd_dnn,
+                                        m->actiDesc,
+                                        &alpha,
+                                        m->outputTensor,
+                                        static_cast<DT*>(output_ptr) + out_dim * bc->num_inference_tokens(),
+                                        &beta,
+                                        m->outputTensor,
+                                        static_cast<DT*>(output_ptr) + out_dim * bc->num_inference_tokens()));
+    } else if (m->activation == AC_MODE_GELU) {
+      size_t elements = (size_t)out_dim * (size_t)bc->num_finetuning_fwd_tokens();
+      constexpr float B = 0.7978845608028654f;   // sqrt(2.0/M_PI)
+      constexpr float C = 0.035677408136300125f; // 0.044715 * sqrt(2.0/M_PI)
+      gelu_forward_kernel<<<GET_BLOCKS(elements), CUDA_NUM_THREADS, 0, m->handle.peft_fwd_stream>>>(
+          elements, B, C, (float *)static_cast<DT*>(output_ptr) + out_dim * bc->num_inference_tokens());
+    } else if (m->activation == AC_MODE_NONE) {
+      // Do nothing
+    } else {
+      assert(false && "Unsupported activation for Linear");
+    }
+
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_done, m->handle.peft_fwd_stream));
+  }
+
+  // launch inference kernel if there are inference tokens
+  if (bc->num_inference_tokens() > 0) {
+
+    checkCUDA(cublasSetStream(m->handle.blas, main_stream));
+    checkCUDNN(cudnnSetStream(m->handle.dnn, main_stream));
+    DT alpha = 1.0f, beta = 0.0f;
+    cudaDataType_t input_type = ff_to_cuda_datatype(m->input_type[0]);
+    cudaDataType_t weight_type = ff_to_cuda_datatype(m->weight_type[0]);
+    cudaDataType_t output_type = ff_to_cuda_datatype(m->output_type[0]);
+    assert(input_type == weight_type && weight_type == output_type);
+    cudaDataType_t compute_type = output_type;
+    checkCUDA(cublasGemmEx(m->handle.blas,
+                          CUBLAS_OP_T,
+                          CUBLAS_OP_N,
+                          out_dim,
+                          bc->num_inference_tokens(),
+                          in_dim,
+                          &alpha,
+                          weight_ptr,
+                          weight_type,
+                          in_dim,
+                          input_ptr,
+                          input_type,
+                          in_dim,
+                          &beta,
+                          output_ptr,
+                          output_type,
+                          out_dim,
+                          compute_type,
+                          CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+    // use_bias = True
+    if (bias_ptr != NULL) {
+      // fuse bias and relu
+      if (m->activation == AC_MODE_RELU) {
+        int parallelism = out_dim * bc->num_inference_tokens();
+        AddBiasWithReLU<<<GET_BLOCKS(parallelism), CUDA_NUM_THREADS, 0, main_stream>>>(
+            static_cast<DT *>(output_ptr),
+            static_cast<DT const *>(bias_ptr),
+            out_dim,
+            bc->num_inference_tokens());
+        return;
+      }
+      checkCUDA(cublasGemmEx(m->handle.blas,
+                            CUBLAS_OP_T,
+                            CUBLAS_OP_N,
+                            out_dim,
+                            bc->num_inference_tokens(),
+                            1,
+                            &alpha,
+                            bias_ptr,
+                            weight_type,
+                            1,
+                            static_cast<DT *>(m->one_ptr),
+                            weight_type,
+                            1,
+                            &alpha,
+                            output_ptr,
+                            output_type,
+                            out_dim,
+                            compute_type,
+                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    }
+    if (use_activation(m->activation)) {
+      checkCUDNN(cudnnActivationForward(m->handle.dnn,
+                                        m->actiDesc,
+                                        &alpha,
+                                        m->outputTensor,
+                                        output_ptr,
+                                        &beta,
+                                        m->outputTensor,
+                                        output_ptr));
+    } else if (m->activation == AC_MODE_GELU) {
+      size_t elements = (size_t)out_dim * (size_t)bc->num_inference_tokens();
+      constexpr float B = 0.7978845608028654f;   // sqrt(2.0/M_PI)
+      constexpr float C = 0.035677408136300125f; // 0.044715 * sqrt(2.0/M_PI)
+      gelu_forward_kernel<<<GET_BLOCKS(elements), CUDA_NUM_THREADS, 0, main_stream>>>(
+          elements, B, C, (float *)output_ptr);
+    } else if (m->activation == AC_MODE_NONE) {
+      // Do nothing
+    } else {
+      assert(false && "Unsupported activation for Linear");
+    }
+
+  }
+
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaStreamWaitEvent(main_stream, m->handle.peft_fwd_done, 0));
+  }
+
+}
+
+template <typename DT>
 void inference_kernel(LinearMeta const *m,
+                      BatchConfig const *bc,
                       void const *input_ptr,
                       void *output_ptr,
                       void const *weight_ptr,
                       void const *bias_ptr,
                       int in_dim,
                       int out_dim,
-                      int batch_size,
                       ffStream_t stream) {
+  if (m->peft_support_mode == SPATIAL_SHARING || m->peft_support_mode == SPATIAL_SHARING_LIMITED) {
+    inference_kernel_spatial_sharing<DT>(m, bc, input_ptr, output_ptr, weight_ptr, bias_ptr, in_dim, out_dim, stream);
+    return;
+  }
   // additional processing for uploading weights
   if (m->offload) {
     // Note that we update weight_ptr when uploading weight
@@ -370,7 +563,7 @@ void inference_kernel(LinearMeta const *m,
                          CUBLAS_OP_T,
                          CUBLAS_OP_N,
                          out_dim,
-                         batch_size,
+                         bc->num_active_tokens(),
                          in_dim,
                          &alpha,
                          m->offload ? m->weight_ptr : weight_ptr,
@@ -390,19 +583,19 @@ void inference_kernel(LinearMeta const *m,
   if (bias_ptr != NULL) {
     // fuse bias and relu
     if (m->activation == AC_MODE_RELU) {
-      int parallelism = out_dim * batch_size;
+      int parallelism = out_dim * bc->num_active_tokens();
       AddBiasWithReLU<<<GET_BLOCKS(parallelism), CUDA_NUM_THREADS, 0, stream>>>(
           static_cast<DT *>(output_ptr),
           static_cast<DT const *>(bias_ptr),
           out_dim,
-          batch_size);
+          bc->num_active_tokens());
       return;
     }
     checkCUDA(cublasGemmEx(m->handle.blas,
                            CUBLAS_OP_T,
                            CUBLAS_OP_N,
                            out_dim,
-                           batch_size,
+                           bc->num_active_tokens(),
                            1,
                            &alpha,
                            bias_ptr,
@@ -428,7 +621,7 @@ void inference_kernel(LinearMeta const *m,
                                       m->outputTensor,
                                       output_ptr));
   } else if (m->activation == AC_MODE_GELU) {
-    size_t elements = (size_t)out_dim * (size_t)batch_size;
+    size_t elements = (size_t)out_dim * (size_t)bc->num_active_tokens();
     constexpr float B = 0.7978845608028654f;   // sqrt(2.0/M_PI)
     constexpr float C = 0.035677408136300125f; // 0.044715 * sqrt(2.0/M_PI)
     gelu_forward_kernel<<<GET_BLOCKS(elements), CUDA_NUM_THREADS, 0, stream>>>(
@@ -477,8 +670,8 @@ void peft_bwd_kernel(LinearMeta const *m,
                      int in_dim,
                      int out_dim,
                      ffStream_t stream) {
-  checkCUDA(cublasSetStream(m->handle.peft_blas, stream));
-  checkCUDNN(cudnnSetStream(m->handle.peft_dnn, stream));
+  checkCUDA(cublasSetStream(m->handle.peft_bwd_blas, stream));
+  checkCUDNN(cudnnSetStream(m->handle.peft_bwd_dnn, stream));
 
   assert(
       bc->peft_bwd_applies_to_this_layer(m->layer_guid.transformer_layer_id));
@@ -527,7 +720,7 @@ void peft_bwd_kernel(LinearMeta const *m,
   }
 
   if (input_grad_ptr != NULL) {
-    checkCUDA(cublasGemmEx(m->handle.peft_blas,
+    checkCUDA(cublasGemmEx(m->handle.peft_bwd_blas,
                            CUBLAS_OP_N,
                            CUBLAS_OP_N,
                            in_dim,

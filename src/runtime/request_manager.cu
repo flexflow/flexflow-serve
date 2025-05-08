@@ -45,7 +45,7 @@ void RequestManager::load_tokens_task(
 
   // Extreme long prompts are not supported, only load up to
   // BatchConfig::max_tokens_per_batch() as prompt
-  if (batch_config->num_tokens > BatchConfig::max_tokens_per_batch() &&
+  if (batch_config->num_inference_tokens() > BatchConfig::max_tokens_per_batch() &&
       batch_config->get_mode() == INC_DECODING_MODE) {
     printf("Warning: too many tokens in prompt, only load up to %d tokens\n",
            BatchConfig::max_tokens_per_batch());
@@ -62,7 +62,7 @@ void RequestManager::load_tokens_task(
     //     std::cout << "Unable to open file: " << filename << std::endl;
     // }
 
-  } else if (batch_config->num_tokens >
+  } else if (batch_config->num_inference_tokens() >
                  BatchConfig::max_verify_tokens_per_batch() &&
              batch_config->get_mode() != INC_DECODING_MODE) {
     printf("Warning: Speculative decoding. too many tokens in prompt, only "
@@ -71,19 +71,19 @@ void RequestManager::load_tokens_task(
     printf("Got: %d tokens\n", batch_config->num_tokens);
   }
 
-  for (int i = 0; i < batch_config->num_tokens; i++) {
+  for (int i = 0; i < batch_config->num_active_tokens(); i++) {
     dram_copy[i] = batch_config->tokensInfo[i].token_id;
   }
   TokenId *fb_ptr = helperGetTensorPointerWO<TokenId>(
       regions[0], task->regions[0], FID_DATA, ctx, runtime);
   Domain domain = runtime->get_index_space_domain(
       ctx, task->regions[0].region.get_index_space());
-  assert(batch_config->num_tokens <= domain.get_volume());
+  assert(batch_config->num_active_tokens() <= domain.get_volume());
   cudaStream_t stream;
   checkCUDA(get_legion_stream(&stream));
   checkCUDA(cudaMemcpyAsync(fb_ptr,
                             dram_copy,
-                            sizeof(TokenId) * batch_config->num_tokens,
+                            sizeof(TokenId) * batch_config->num_active_tokens(),
                             cudaMemcpyHostToDevice,
                             stream));
 }

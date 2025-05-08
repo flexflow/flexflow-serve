@@ -127,7 +127,7 @@ Op::Op(FFModel &model,
       numInputs(_numInputs), numWeights(_numWeights), numOutputs(_numOutputs),
       profiling(model.config.profiling),
       inference_debugging(model.config.inference_debugging),
-      enable_peft_finetuning(model.config.enable_peft_finetuning) {
+      peft_support_mode(model.config.peft_support_mode) {
   for (int i = 0; i < MAX_NUM_INPUTS; i++) {
     inputs[i] = NULL;
   }
@@ -176,7 +176,7 @@ Op::Op(FFModel &model,
       numInputs(_numInputs), numWeights(_numWeights), numOutputs(_numOutputs),
       profiling(model.config.profiling),
       inference_debugging(model.config.inference_debugging),
-      enable_peft_finetuning(model.config.enable_peft_finetuning) {
+      peft_support_mode(model.config.peft_support_mode) {
   std::string pcname;
   if (_name == NULL) {
     pcname = get_operator_type_name(op_type);
@@ -1501,7 +1501,7 @@ bool Op::get_weight_parameter(TNParameter tnp,
 OpMeta::OpMeta(FFHandler _handle, Op const *op)
     : handle(_handle), profiling(op->profiling),
       inference_debugging(op->inference_debugging),
-      enable_peft_finetuning(op->enable_peft_finetuning),
+      peft_support_mode(op->peft_support_mode),
       layer_guid(op->layer_guid) {
   for (int i = 0; i < op->numInputs; i++) {
     trainable_inputs[i] = op->trainable_inputs[i];
@@ -4371,7 +4371,7 @@ struct DefaultConfig {
   const static bool profiling = false;
   const static bool benchmarking = false;
   const static bool inference_debugging = false;
-  const static bool enable_peft_finetuning = false;
+  const static PeftSupportMode peft_support_mode = PEFT_DISABLED;
   constexpr static float learningRate = 0.01f;
   constexpr static float weightDecay = 0.0001f;
   const static size_t workSpaceSize = (size_t)128 * 1024 * 1024; // 128 MB
@@ -4411,7 +4411,6 @@ FFConfig::FFConfig() {
   log_instance_creation = DefaultConfig::log_instance_creation;
   benchmarking = DefaultConfig::benchmarking;
   inference_debugging = DefaultConfig::inference_debugging;
-  enable_peft_finetuning = DefaultConfig::enable_peft_finetuning;
   learningRate = DefaultConfig::learningRate;
   weightDecay = DefaultConfig::weightDecay;
   workSpaceSize = DefaultConfig::workSpaceSize;
@@ -4426,7 +4425,7 @@ FFConfig::FFConfig() {
   cpu_offload = DefaultConfig::cpuOffload;
   offload_reserve_space_size = DefaultConfig::offloadReserveSpaceSize;
   // PEFT related fields
-  enable_peft = DefaultConfig::enablePeft;
+  peft_support_mode = DefaultConfig::peft_support_mode;
   quantization_type = DT_NONE;
   only_data_parallel = DefaultConfig::onlyDataParallel;
   data_parallelism_degree = 1;
@@ -4551,10 +4550,6 @@ void FFConfig::parse_args(char **argv, int argc) {
     }
     if ((!strcmp(argv[i], "--8bit-quantization"))) {
       quantization_type = DT_INT8;
-      continue;
-    }
-    if ((!strcmp(argv[i], "-enable-peft"))) {
-      enable_peft = true;
       continue;
     }
     if ((!strcmp(argv[i], "--only-data-parallel"))) {

@@ -88,13 +88,17 @@ struct CombinedBatchConfigMetaStruct {
 
 struct FFHandler {
 #if defined(FF_USE_CUDA) || defined(FF_USE_HIP_CUDA)
-  cudnnHandle_t dnn, peft_dnn;
-  cublasHandle_t blas, peft_blas;
+  cudnnHandle_t dnn, peft_fwd_dnn, peft_bwd_dnn;
+  cublasHandle_t blas, peft_fwd_blas, peft_bwd_blas;
   cudaStream_t peft_fwd_stream;
+  cudaEvent_t peft_fwd_can_start;
+  cudaEvent_t peft_fwd_done;
 #else
-  miopenHandle_t dnn, peft_dnn;
-  hipblasHandle_t blas, peft_blas;
+  miopenHandle_t dnn, peft_fwd_dnn, peft_bwd_dnn;
+  hipblasHandle_t blas, peft_fwd_blas, peft_bwd_blas;
   hipStream_t peft_fwd_stream;
+  hipEvent_t peft_fwd_can_start;
+  hipEvent_t peft_fwd_done;
 #endif
   void *workSpace;
   size_t workSpaceSize;
@@ -178,7 +182,7 @@ public:
   size_t offload_reserve_space_size;
   DataType quantization_type;
   // PEFT related fields
-  bool enable_peft, enable_peft_finetuning;
+  PeftSupportMode peft_support_mode;
   // Control parallelizable dimensions
   bool only_data_parallel;
   bool enable_sample_parallel;

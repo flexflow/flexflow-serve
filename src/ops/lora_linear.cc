@@ -53,7 +53,7 @@ bool check_lora_layer_match(Layer *potential_target,
 }
 
 void FFModel::add_lora_layers(std::vector<std::string> target_modules) {
-  assert(config.enable_peft &&
+  assert(peft_enabled(config.peft_support_mode) &&
          "Cannot add a LoRA layer if PEFT mode is not enabled");
   assert(target_modules.size() > 0 && "LoRA target module name is empty");
   RequestManager *rm = RequestManager::get_request_manager();

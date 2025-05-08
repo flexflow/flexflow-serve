@@ -512,7 +512,6 @@ OpMeta *IncMultiHeadSelfAttention::init_task(
          peft_mem_allocator.instance_total_size);
   // m->profiling = attn->profiling;
   // m->inference_debugging = attn->inference_debugging;
-  // m->enable_peft_finetuning = attn->enable_peft_finetuning;
   std::strcpy(m->op_name, attn->name);
   m->layer_guid = attn->layer_guid;
 

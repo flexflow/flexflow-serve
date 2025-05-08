@@ -17,13 +17,13 @@ public:
 
 namespace Kernels {
 namespace Embedding {
-void forward_kernel_wrapper(EmbeddingMeta const *m,
+void inference_kernel_wrapper(EmbeddingMeta const *m,
+                              BatchConfig const *bc,
                             GenericTensorAccessorR const &input,
                             GenericTensorAccessorW const &output,
                             GenericTensorAccessorR const &weight,
                             int in_dim,
-                            int out_dim,
-                            int batch_size);
+                            int out_dim);
 void backward_kernel_wrapper(EmbeddingMeta const *m,
                              GenericTensorAccessorR const &input,
                              GenericTensorAccessorR const &output,
@@ -34,17 +34,26 @@ void backward_kernel_wrapper(EmbeddingMeta const *m,
 
 namespace Internal {
 template <typename TI, typename TD>
-void forward_kernel(TI const *input_ptr,
+void forward_kernel(EmbeddingMeta const *m,
+                    BatchConfig const *bc,
+                    TI const *input_ptr,
                     TD *output_ptr,
                     TD const *weight_ptr,
                     int in_dim,
                     int out_dim,
-                    int batch_size,
-                    AggrMode aggr,
-                    int outputSize,
-                    ffStream_t stream);
-
-;
+                    // int batch_size,
+                    // AggrMode aggr,
+                    // int outputSize,
+                    cudaStream_t stream);
+template <typename TI, typename TD>
+void forward_kernel_spatial_sharing(EmbeddingMeta const *m,
+                                    BatchConfig const *bc,
+                                    TI const *input_ptr,
+                                    TD *output_ptr,
+                                    TD const *weight_ptr,
+                                    int in_dim,
+                                    int out_dim,
+                                    cudaStream_t main_stream);
 } // namespace Internal
 } // namespace Embedding
 } // namespace Kernels

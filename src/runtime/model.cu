@@ -93,6 +93,8 @@ FFHandler
   handle.allowTensorOpMathConversion = info->allowTensorOpMathConversion;
 
   checkCUDA(cudaStreamCreate(&handle.peft_fwd_stream));
+  checkCUDA(cudaEventCreate(&handle.peft_fwd_can_start));
+  checkCUDA(cudaEventCreate(&handle.peft_fwd_done));
 
   // flashinfer
   handle.incr_attention_metadata = new AttentionMetaData();
@@ -105,12 +107,18 @@ FFHandler
     checkCUDA(cublasSetMathMode(handle.blas, CUBLAS_TENSOR_OP_MATH));
   }
   checkCUDNN(cudnnCreate(&handle.dnn));
-  // cublas/dnn handles for peft stream
-  checkCUDA(cublasCreate(&handle.peft_blas));
+  // cublas/dnn handles for peft bwd stream
+  checkCUDA(cublasCreate(&handle.peft_bwd_blas));
   if (handle.allowTensorOpMathConversion) {
-    checkCUDA(cublasSetMathMode(handle.peft_blas, CUBLAS_TENSOR_OP_MATH));
+    checkCUDA(cublasSetMathMode(handle.peft_bwd_blas, CUBLAS_TENSOR_OP_MATH));
   }
-  checkCUDNN(cudnnCreate(&handle.peft_dnn));
+  checkCUDNN(cudnnCreate(&handle.peft_bwd_dnn));
+  // cublas/dnn handles for peft fwd stream (should only be used for SPATIAL SHARING)
+  checkCUDA(cublasCreate(&handle.peft_fwd_blas));
+  if (handle.allowTensorOpMathConversion) {
+    checkCUDA(cublasSetMathMode(handle.peft_fwd_blas, CUBLAS_TENSOR_OP_MATH));
+  }
+  checkCUDNN(cudnnCreate(&handle.peft_fwd_dnn));
 
   // #ifdef FF_USE_NCCL
   //   checkNCCL(ncclCommInitRank(&handle.nccl, info->allRanks, info->ncclId,

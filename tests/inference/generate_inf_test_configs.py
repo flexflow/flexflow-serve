@@ -19,7 +19,7 @@ ff_init_configs = {
     "offload_reserve_space_size": 8 * 1024, # 8 GB
     "use_4bit_quantization": False,
     "use_8bit_quantization": False,
-    "enable_peft": False,
+    "peft_support_mode": "PEFT_DISABLED",
     "profiling": False,
     "benchmarking": False,
     "inference_debugging": False,

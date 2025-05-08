@@ -68,11 +68,11 @@ __global__ void argmaxKernel(T const *__restrict__ input,
 
   // Each thread processes a subset of the column.
   float thread_max = -FLT_MAX;
-  int thread_idx = -1;
+  int thread_idx = 0;
   for (int i = threadIdx.x; i < vocab_size; i += BLOCK_SIZE) {
     float val = toFloat(col_ptr[i]);
-    if (val > thread_max) {
-      thread_max = val;
+    if (val > thread_max || isnan(val)) {
+      thread_max = isnan(val) ? -FLT_MAX : val; // Handle NaN values
       thread_idx = i;
     }
   }
@@ -128,27 +128,113 @@ __global__ void compute_sparse_categorical_crossentropy_loss(
   }
 }
 
+template <typename DT>
+void inference_kernel_spatial_sharing(ArgMaxMeta const *m,
+                                      BatchConfig const *bc,
+                                      DT const *input_ptr,
+                                      int *indices_ptr,
+                                      int const num_classes,
+                                      float *loss,
+                                      cudaStream_t main_stream) {
+  assert(!m->beam_search);
+  assert(input_ptr != nullptr);
+  assert(indices_ptr != nullptr);
+  assert(loss != nullptr);
+  assert(bc != nullptr);
+  
+  // launch finetuning fwd tokens kernel if there are any finetuning fwd tokens
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_can_start, main_stream)); 
+    checkCUDA(cudaStreamWaitEvent(m->handle.peft_fwd_stream, m->handle.peft_fwd_can_start, 0));
+
+    // launchArgmaxKernel(input_ptr + num_classes * bc->num_inference_tokens(), 
+    //                   num_classes, 
+    //                   bc->num_finetuning_fwd_tokens(), 
+    //                   indices_ptr + bc->num_inference_tokens(), 
+    //                   nullptr, 
+    //                   m->handle.peft_fwd_stream);
+
+    // print_tensor(indices_ptr, batch_size, "indices_ptr: ");
+
+    // compute cross-entropy loss if there is a finetuning request
+    assert(loss != nullptr);
+    BatchConfig::TokenId token_ids[BatchConfig::MAX_NUM_TOKENS];
+    int i = bc->finetuning_request_index();
+    assert(bc->requestsInfo[i].peft_model_id != PEFTModelID::NO_ID);
+    assert(!bc->requestsInfo[i].finetuning_backward_phase);
+    int num_finetuning_tokens = bc->requestsInfo[i].num_tokens_in_batch - 1;
+    assert(num_finetuning_tokens + 1 == bc->num_finetuning_fwd_tokens());
+    int first_token_offset = bc->requestsInfo[i].first_token_offset_in_batch;
+    for (int j = 0; j < num_finetuning_tokens; j++) {
+      token_ids[j] = bc->tokensInfo[j + first_token_offset + 1].token_id;
+    }
+    checkCUDA(
+        cudaMemcpyAsync(m->handle.workSpace,
+                        token_ids,
+                        sizeof(BatchConfig::TokenId) * num_finetuning_tokens,
+                        cudaMemcpyHostToDevice,
+                        m->handle.peft_fwd_stream));
+    // copy loss to d_loss
+    checkCUDA(cudaMemsetAsync(m->d_loss, 0, sizeof(float), m->handle.peft_fwd_stream));
+    compute_sparse_categorical_crossentropy_loss<<<
+        GET_BLOCKS(num_finetuning_tokens),
+        min(CUDA_NUM_THREADS, num_finetuning_tokens),
+        0,
+        m->handle.peft_fwd_stream>>>(input_ptr + first_token_offset * num_classes,
+                  static_cast<BatchConfig::TokenId *>(m->handle.workSpace),
+                  m->d_loss,
+                  num_finetuning_tokens,
+                  num_classes);
+    // copy value from d_loss to loss
+    checkCUDA(cudaMemcpyAsync(
+        loss, m->d_loss, sizeof(float), cudaMemcpyDeviceToHost, m->handle.peft_fwd_stream));
+    *loss = *loss / (float)num_finetuning_tokens;
+
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_done, m->handle.peft_fwd_stream));
+  }
+
+  // launch inference kernel if there are inference tokens
+  if (bc->num_inference_tokens() > 0) {
+    launchArgmaxKernel(
+      input_ptr, num_classes, bc->num_inference_tokens(), indices_ptr, nullptr, main_stream);
+  }
+
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaStreamWaitEvent(main_stream, m->handle.peft_fwd_done, 0));
+  }
+}
+
 /*static*/
 template <typename DT>
-void ArgMax::forward_kernel(ArgMaxMeta const *m,
+void ArgMax::inference_kernel(ArgMaxMeta const *m,
                             BatchConfig const *bc,
                             DT const *input_ptr,
                             int *indices_ptr,
                             float *prob_ptr,
                             int *parent,
-                            int const length,
-                            int const batch_size,
+                            int const num_classes,
                             float *loss,
                             cudaStream_t stream) {
-  checkCUDNN(cudnnSetStream(m->handle.dnn, stream));
+  if (m->peft_support_mode == SPATIAL_SHARING || m->peft_support_mode == SPATIAL_SHARING_LIMITED) {
+    inference_kernel_spatial_sharing(m,
+                                     bc,
+                                     input_ptr,
+                                     indices_ptr,
+                                     num_classes,
+                                     loss,
+                                     stream);
+    return;
+  }
 
   if (m->beam_search) {
     // set all parents id zero in arg top1 case.
-    checkCUDA(cudaMemsetAsync(parent, 0, batch_size * sizeof(int), stream));
+    checkCUDA(cudaMemsetAsync(parent, 0, bc->num_active_tokens() * sizeof(int), stream));
   }
 
-  launchArgmaxKernel(
-      input_ptr, length, batch_size, indices_ptr, prob_ptr, stream);
+  if (bc->num_inference_tokens() > 0) {
+    launchArgmaxKernel(
+        input_ptr, num_classes, bc->num_inference_tokens(), indices_ptr, prob_ptr, stream);
+  }
 
   // print_tensor(indices_ptr, batch_size, "indices_ptr: ");
 
@@ -178,11 +264,11 @@ void ArgMax::forward_kernel(ArgMaxMeta const *m,
         GET_BLOCKS(num_finetuning_tokens),
         min(CUDA_NUM_THREADS, num_finetuning_tokens),
         0,
-        stream>>>(input_ptr + first_token_offset * length,
+        stream>>>(input_ptr + first_token_offset * num_classes,
                   static_cast<BatchConfig::TokenId *>(m->handle.workSpace),
                   m->d_loss,
                   num_finetuning_tokens,
-                  length);
+                  num_classes);
     // copy value from d_loss to loss
     checkCUDA(cudaMemcpyAsync(
         loss, m->d_loss, sizeof(float), cudaMemcpyDeviceToHost, stream));
@@ -191,12 +277,11 @@ void ArgMax::forward_kernel(ArgMaxMeta const *m,
 }
 
 /*static*/
-void ArgMax::forward_kernel_wrapper(ArgMaxMeta const *m,
+void ArgMax::inference_kernel_wrapper(ArgMaxMeta const *m,
                                     BatchConfig const *bc,
                                     GenericTensorAccessorR const &input,
                                     GenericTensorAccessorW const &indices,
                                     GenericTensorAccessorW const &parent,
-                                    int batch_size,
                                     float *loss) {
   cudaStream_t stream;
   checkCUDA(get_legion_stream(&stream));
@@ -206,31 +291,29 @@ void ArgMax::forward_kernel_wrapper(ArgMaxMeta const *m,
     cudaEventCreate(&t_end);
     cudaEventRecord(t_start, stream);
   }
-  int length = input.domain.hi()[0] - input.domain.lo()[0] + 1;
+  int num_classes = input.domain.hi()[0] - input.domain.lo()[0] + 1;
 
   if (input.data_type == DT_HALF) {
-    ArgMax::forward_kernel<half>(m,
+    ArgMax::inference_kernel<half>(m,
                                  bc,
                                  input.get_half_ptr(),
                                  indices.get_int32_ptr(),
                                  m->beam_search ? m->probs : nullptr,
                                  m->beam_search ? parent.get_int32_ptr()
                                                 : nullptr,
-                                 length,
-                                 batch_size,
+                                 num_classes,
                                  loss,
                                  stream);
 
   } else if (input.data_type == DT_FLOAT) {
-    ArgMax::forward_kernel<float>(m,
+    ArgMax::inference_kernel<float>(m,
                                   bc,
                                   input.get_float_ptr(),
                                   indices.get_int32_ptr(),
                                   m->beam_search ? m->probs : nullptr,
                                   m->beam_search ? parent.get_int32_ptr()
                                                  : nullptr,
-                                  length,
-                                  batch_size,
+                                  num_classes,
                                   loss,
                                   stream);
   } else {

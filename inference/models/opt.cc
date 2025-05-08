@@ -43,7 +43,7 @@ void OPT::create_opt_model(FFModel &ff,
   int batch_tensor_num_tokens = BatchConfig::max_tokens_per_batch();
   if (mode == TREE_VERIFY_MODE || mode == BEAM_SEARCH_MODE) {
     batch_tensor_num_tokens = BatchConfig::max_verify_tokens_per_batch();
-  } else if (ff.config.enable_peft_finetuning) {
+  } else if (peft_finetuning_enabled(ff.config.peft_support_mode)) {
     batch_tensor_num_tokens = BatchConfig::max_sequence_length();
   }
   int const token_dims[] = {batch_tensor_num_tokens, 1};
@@ -286,7 +286,7 @@ void OPT::create_opt_model(FFModel &ff,
   }
 
   // If PEFT is enabled, add LoRA layers
-  if (ff.config.enable_peft) {
+  if (peft_enabled(ff.config.peft_support_mode)) {
     // todo: add attention projections
     std::vector<std::string> target_modules = {"fc1", "fc2"};
     ff.add_lora_layers(target_modules);

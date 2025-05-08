@@ -36,7 +36,7 @@ To run a PEFT model example in C++, call:
     -llm-model JackFram/llama-160m \
     -finetuning-dataset ../inference/prompt/peft_dataset.json \
     -peft-model goliaro/llama-160m-lora \
-    -enable-peft \
+    --peft-support-mode COSERVING \
     --use-full-precision \
     --inference-debugging
 ```

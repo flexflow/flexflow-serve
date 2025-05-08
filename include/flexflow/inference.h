@@ -14,6 +14,7 @@
  */
 
 #pragma once
+#include "flexflow/ffconst_utils.h"
 #include "flexflow/batch_config.h"
 #include <string>
 #include <vector>

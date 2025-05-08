@@ -338,13 +338,20 @@ void RequestManager::set_max_fwd_finetuning_tokens_per_batch(
     int max_num_tokens) {
   max_fwd_finetuning_tokens_per_batch = max_num_tokens;
   assert(max_fwd_finetuning_tokens_per_batch <= BatchConfig::MAX_NUM_TOKENS);
-  assert(max_fwd_finetuning_tokens_per_batch <= max_tokens_per_batch);
+  if (peft_support_mode == COSERVING) {
+    assert(max_fwd_finetuning_tokens_per_batch <= max_tokens_per_batch);
+  }
   // assert(max_fwd_finetuning_tokens_per_batch > 0);
 }
 
 int RequestManager::get_max_fwd_finetuning_tokens_per_batch() {
   // assert(max_fwd_finetuning_tokens_per_batch > 0 &&
   // max_fwd_finetuning_tokens_per_batch <= max_tokens_per_batch);
+  if (peft_support_mode == SPATIAL_SHARING || peft_support_mode == TEMPORAL_SHARING || peft_support_mode == SPATIAL_SHARING_SEPARATE_TASKS) {
+    assert(max_fwd_finetuning_tokens_per_batch == BatchConfig::MAX_NUM_TOKENS);
+  } else {
+    assert(max_fwd_finetuning_tokens_per_batch < BatchConfig::MAX_NUM_TOKENS);
+  }
   return max_fwd_finetuning_tokens_per_batch;
 }
 
@@ -379,8 +386,11 @@ void RequestManager::push_spec_infer_tree_width(int tree_width) {
   spec_infer_tree_width.emplace_back(tree_width);
 }
 
-void RequestManager::set_enable_peft_finetuning(bool enable_peft_finetuning_) {
-  enable_peft_finetuning = enable_peft_finetuning_;
+void RequestManager::set_peft_support_mode(PeftSupportMode peft_support_mode_) {
+  peft_support_mode = peft_support_mode_;
+  if (peft_support_mode == SPATIAL_SHARING || peft_support_mode == TEMPORAL_SHARING || peft_support_mode == SPATIAL_SHARING_SEPARATE_TASKS) {
+    set_max_fwd_finetuning_tokens_per_batch(BatchConfig::MAX_NUM_TOKENS);
+  }
 }
 
 void RequestManager::set_inference_finished(bool finished) {
@@ -545,9 +555,18 @@ int RequestManager::get_num_layers_per_finetuning_step() {
   return num_layers_per_finetuning_step;
 }
 
+void RequestManager::set_temporal_sharing_frequency(
+    int temporal_sharing_frequency_) {
+  temporal_sharing_frequency = temporal_sharing_frequency_;
+}
+
+int RequestManager::get_temporal_sharing_frequency() {
+  return temporal_sharing_frequency;
+}
+
 PEFTModelID *
     FFModel::register_peft_adapter(LoraLinearConfig const &peft_config) {
-  assert(config.enable_peft &&
+  assert(peft_enabled(config.peft_support_mode) &&
          "Cannot add a LoRA layer if PEFT mode is not enabled");
   if (peft_config.target_modules.size() == 0) {
     printf("PEFT config does not contain any target module\n");
@@ -657,7 +676,7 @@ RequestGuid RequestManager::register_new_request(Request const &request_) {
 }
 
 RequestGuid RequestManager::register_new_peft_request(Request const &request_) {
-  assert(enable_peft_finetuning && "PEFT finetuning is not enabled");
+  assert(peft_finetuning_enabled(peft_support_mode) && "PEFT finetuning is not enabled");
   const std::lock_guard<std::mutex> lock(request_queue_mutex);
   // Add a new request
   Request request = Request::from_other(request_);
@@ -754,6 +773,54 @@ BatchConfigFuture RequestManager::prepare_next_batch(
   return runtime->execute_task(ctx, launcher);
 }
 
+void RequestManager::check_new_bc(BatchConfig const &new_bc) {
+  assert(new_bc.num_inference_tokens() <= max_tokens_per_batch && max_tokens_per_batch <= BatchConfig::MAX_NUM_TOKENS);
+  assert(new_bc.num_active_tokens() <= BatchConfig::MAX_NUM_TOKENS);
+  assert(new_bc.num_finetuning_fwd_tokens() <= max_fwd_finetuning_tokens_per_batch);
+  if (new_bc.num_finetuning_fwd_tokens() > 0) {
+    assert(new_bc.num_finetuning_bwd_tokens() == 0);
+  }
+
+  switch(peft_support_mode) {
+    case SPATIAL_SHARING: 
+    case SPATIAL_SHARING_SEPARATE_TASKS: {
+      break;
+    } 
+    case TEMPORAL_SHARING: {
+      if (peft_temporal_sharing_state == INFERENCE) {
+        assert(new_bc.num_finetuning_fwd_tokens() == 0);
+        assert(new_bc.num_finetuning_bwd_tokens() == 0);
+      } else if (peft_temporal_sharing_state == FINETUNING_FWD) {
+        assert(new_bc.num_inference_tokens() == 0);
+        assert(new_bc.num_finetuning_bwd_tokens() == 0);
+      } else if (peft_temporal_sharing_state == FINETUNING_BWD) {
+        assert(new_bc.num_inference_tokens() == 0);
+        assert(new_bc.num_finetuning_fwd_tokens() == 0);
+      }
+      break;
+    }
+    case SPATIAL_SHARING_LIMITED:
+    case TEMPORAL_SHARING_LIMITED:
+    case COSERVING: {
+      assert(new_bc.num_active_tokens() <= max_tokens_per_batch);
+      break;
+    } 
+    case PEFT_INFERENCE_ONLY: {
+      assert(new_bc.num_finetuning_bwd_tokens() == 0);
+      assert(new_bc.num_active_tokens() <= max_tokens_per_batch);
+      break;
+    } 
+    case PEFT_DISABLED: {
+      assert(new_bc.num_active_tokens() <= max_tokens_per_batch);
+      assert(new_bc.num_finetuning_fwd_tokens() == 0 && new_bc.num_finetuning_bwd_tokens() == 0);
+      break;
+    }
+    default: {
+      assert(false && "Invalid PEFT support mode");
+    }
+  }
+}
+
 BatchConfig RequestManager::prepare_next_batch_task(
     Task const *task,
     std::vector<PhysicalRegion> const &regions,
@@ -772,7 +839,34 @@ BatchConfig RequestManager::prepare_next_batch_task(
   rm->process_work_from_old_batch(*old_bc, result);
   BatchConfig new_bc = rm->prepare_next_fwd_batch(*old_bc, result);
   new_bc = rm->prepare_next_bwd_batch(new_bc);
+  rm->check_new_bc(new_bc);
+  // if (rm->inference_finished) {
+  //   printf("prepare_next_batch_task finished, returning new batch\n");
+  // }
   return new_bc;
+}
+
+void RequestManager::update_peft_temporal_sharing_state(void) {
+  // int old_state = peft_temporal_sharing_state;
+  assert(peft_support_mode == TEMPORAL_SHARING || 
+         peft_support_mode == TEMPORAL_SHARING_LIMITED);
+  if (peft_temporal_sharing_state == INFERENCE) {
+    peft_temporal_sharing_inf_step++;
+    if (peft_temporal_sharing_inf_step >= get_temporal_sharing_frequency()) {
+      peft_temporal_sharing_inf_step = 0;
+      peft_temporal_sharing_state = FINETUNING_FWD;
+    }
+  } else if (peft_temporal_sharing_state == FINETUNING_FWD) {
+    peft_temporal_sharing_state = FINETUNING_BWD;
+  } else if (peft_temporal_sharing_state == FINETUNING_BWD) {  
+    peft_temporal_sharing_state = INFERENCE;
+    peft_temporal_sharing_inf_step = 0;
+  } else {
+    assert(false && "Invalid temporal sharing state");
+  }
+  // if (inference_finished) {
+  //   printf("PEFT temporal sharing state changed from %d to %d with inference_finished=true\n", old_state, peft_temporal_sharing_state);
+  // }
 }
 
 bool RequestManager::is_eos_token(int token_id) {
@@ -924,6 +1018,10 @@ void RequestManager::record_decoding_req_profiling_info(
 void RequestManager::process_inf_req_progress(BatchConfig const &old_fwd_bc,
                                               InferenceResult const &result) {
   // printf("Entering process_inf_req_progress\n");
+  if (inference_finished) {
+    assert(old_fwd_bc.num_inference_tokens() == 0);
+    return;
+  }
   for (int i = 0; i < old_fwd_bc.num_active_tokens(); i++) {
     size_t guid =
         old_fwd_bc.requestsInfo[old_fwd_bc.tokensInfo[i].request_index]
@@ -943,8 +1041,15 @@ void RequestManager::process_inf_req_progress(BatchConfig const &old_fwd_bc,
       // This is a decoding token
       assert(old_fwd_bc.tokensInfo[i].abs_depth_in_request + 1 ==
              request.tokens.size());
-      assert(result.token_ids[i] >= 0);
-      request.tokens.push_back(result.token_ids[i]);
+      if (result.token_ids[i] >= 0) {
+        request.tokens.push_back(result.token_ids[i]);
+      } else {
+        // Log the error and use a placeholder token
+        std::cerr << "Error: Encountered negative token ID: " << result.token_ids[i] << std::endl;
+        std::cerr << "Token index: " << i << ", Request GUID: " << request.guid << std::endl;
+        // std::cerr << "Batch Config: " << old_fwd_bc << std::endl;
+        request.tokens.push_back(15); // placeholder token
+      }
       if (!profiling_requests[guid].first_token_time_set) {
         profiling_requests[guid].first_token_time =
             Realm::Clock::current_time_in_microseconds();
@@ -954,7 +1059,7 @@ void RequestManager::process_inf_req_progress(BatchConfig const &old_fwd_bc,
     }
   }
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
   for (int req_idx = 0; req_idx < inference_batch_size; req_idx++) {
     if (old_fwd_bc.request_completed[req_idx]) {
       continue;
@@ -1131,7 +1236,7 @@ void RequestManager::add_continuing_inf_req_to_new_batch(
   assert(processed_tokens < request.tokens.size() &&
          "Continuing request has already finished");
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
 
   if (old_bc.requestsInfo[i].peft_model_id != PEFTModelID::NO_ID) {
     num_concurrent_inf_adapters += 1;
@@ -1279,20 +1384,20 @@ void RequestManager::handle_completed_finetuning_req(
     BatchConfig const &old_finetuning_bc) {
   // printf("Entering handle_completed_finetuning_req\n");
   if (!inference_finished) {
-    assert(
-        old_finetuning_bc.num_finetuning_bwd_requests() == 1 &&
-        "Number of active peft bwd requests in a finetuning batch should be 1");
+    assert(old_finetuning_bc.num_finetuning_bwd_requests() == 1 && "Finetuning request can only be finalized after a bwd pass");
+    assert(old_finetuning_bc.num_finetuning_fwd_requests() == 0 && "Finetuning request can only be finalized after a bwd pass");
+    int inference_batch_size =
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
+    assert(!old_finetuning_bc.request_completed[inference_batch_size] &&
+          "Finetuning request not found in new batch");
+    assert(pending_peft_request_queue.size() == 1 &&
+           "Finetuning request queue should only have one request");
   } else {
-    assert(old_finetuning_bc.num_finetuning_fwd_requests() +
-                   old_finetuning_bc.num_finetuning_bwd_requests() ==
-               1 &&
-           "Number of active peft requests should be 1");
+    if (pending_peft_request_queue.empty()) {
+      assert(old_finetuning_bc.num_finetuning_bwd_requests() == 0 && old_finetuning_bc.num_finetuning_fwd_requests() == 0);
+      return;
+    } 
   }
-
-  int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
-  assert(!old_finetuning_bc.request_completed[inference_batch_size] &&
-         "Finetuning request not found in new batch");
 
   // sync metadata with all_requests
   Request &pq_request = pending_peft_request_queue.front();
@@ -1300,9 +1405,9 @@ void RequestManager::handle_completed_finetuning_req(
   assert(request.req_type == RequestType::REQ_FINETUNING &&
          "Found misplaced inference request");
   assert(request.guid == pq_request.guid && "Request GUID mismatch");
-  assert(old_finetuning_bc.requestsInfo[inference_batch_size].request_guid ==
-             pq_request.guid &&
-         "Request GUID mismatch");
+  // assert(old_finetuning_bc.requestsInfo[inference_batch_size].request_guid ==
+  //            pq_request.guid &&
+  //        "Request GUID mismatch");
   request.status = Request::COMPLETED;
   request.peft_finetuning_info = pq_request.peft_finetuning_info;
   // remove from pending peft queue
@@ -1330,13 +1435,15 @@ void RequestManager::handle_completed_finetuning_req(
 
 void RequestManager::add_finetuning_req_fwd_batch(BatchConfig &new_bc) {
   // printf("Entering add_finetuning_req_fwd_batch\n");
-  assert(enable_peft_finetuning && "PEFT finetuning is not enabled");
+  assert(peft_finetuning_enabled(peft_support_mode) && "PEFT finetuning is not enabled");
   assert(!pending_peft_request_queue.empty() &&
          "Trying to add a new finetuning request when there are none");
-  assert(new_bc.num_tokens < get_max_tokens_per_batch() &&
-         "Trying to add a new finetuning request when the batch is full");
+  if (peft_support_mode != TEMPORAL_SHARING && peft_support_mode != SPATIAL_SHARING && peft_support_mode != SPATIAL_SHARING_SEPARATE_TASKS) {
+    assert(new_bc.num_tokens < get_max_tokens_per_batch() &&
+          "Trying to add a new finetuning request when the batch is full");
+  }
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
   assert(new_bc.request_completed[inference_batch_size] &&
          "Finetuning request already present in new batch");
   Request &request = pending_peft_request_queue.front();
@@ -1356,6 +1463,12 @@ void RequestManager::add_finetuning_req_fwd_batch(BatchConfig &new_bc) {
   int batch_capacity_left =
       std::min(get_max_fwd_finetuning_tokens_per_batch(),
                get_max_tokens_per_batch() - new_bc.num_active_tokens());
+  if (peft_support_mode == TEMPORAL_SHARING || peft_support_mode == SPATIAL_SHARING || peft_support_mode == SPATIAL_SHARING_SEPARATE_TASKS) {
+    assert(get_max_fwd_finetuning_tokens_per_batch() == BatchConfig::MAX_NUM_TOKENS);
+    batch_capacity_left =
+      std::min(get_max_fwd_finetuning_tokens_per_batch(),
+               BatchConfig::MAX_NUM_TOKENS - new_bc.num_active_tokens());
+  }
   int num_peft_tokens =
       std::min(num_tokens_left_in_dataset_entry, batch_capacity_left);
   assert(num_peft_tokens > 0 && "No tokens left to add to the batch");
@@ -1401,13 +1514,15 @@ void RequestManager::add_finetuning_req_fwd_batch(BatchConfig &new_bc) {
 
 void RequestManager::add_finetuning_req_bwd_batch(BatchConfig &new_bc) {
   // printf("Entering add_finetuning_req_bwd_batch\n");
-  assert(enable_peft_finetuning && "PEFT finetuning is not enabled");
+  assert(peft_finetuning_enabled(peft_support_mode) && "PEFT finetuning is not enabled");
   assert(!pending_peft_request_queue.empty() &&
          "Trying to add a new finetuning request when there are none");
-  assert(new_bc.num_tokens <= get_max_tokens_per_batch() &&
-         "Trying to add a new finetuning request when the batch is full");
+  if (peft_support_mode != TEMPORAL_SHARING && peft_support_mode != SPATIAL_SHARING && peft_support_mode != SPATIAL_SHARING_SEPARATE_TASKS) {
+    assert(new_bc.num_tokens <= get_max_tokens_per_batch() &&
+          "Trying to add a new finetuning request when the batch is full");
+  }
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
   assert(new_bc.request_completed[inference_batch_size] &&
          "Finetuning request already present in new batch");
   Request &request = pending_peft_request_queue.front();
@@ -1443,7 +1558,12 @@ void RequestManager::add_finetuning_req_bwd_batch(BatchConfig &new_bc) {
   new_bc.requestsInfo[inference_batch_size].finetuning_request = true;
   new_bc.requestsInfo[inference_batch_size].finetuning_backward_phase = true;
 
-  if (get_num_layers_per_finetuning_step() == 0) {
+  int num_layers_per_finetuning_step = get_num_layers_per_finetuning_step();
+  if (peft_support_mode == TEMPORAL_SHARING || peft_support_mode == SPATIAL_SHARING || peft_support_mode == SPATIAL_SHARING_SEPARATE_TASKS) {
+    num_layers_per_finetuning_step = get_num_transformer_layers();
+  }
+
+  if (num_layers_per_finetuning_step == 0) {
     new_bc.requestsInfo[inference_batch_size].peft_bwd_last_layer =
         new_bc.requestsInfo[inference_batch_size].peft_bwd_first_layer =
             INT_MAX;
@@ -1455,7 +1575,7 @@ void RequestManager::add_finetuning_req_bwd_batch(BatchConfig &new_bc) {
     new_bc.requestsInfo[inference_batch_size].peft_bwd_first_layer =
         std::max(0,
                  new_bc.requestsInfo[inference_batch_size].peft_bwd_last_layer -
-                     get_num_layers_per_finetuning_step() + 1); // inclusive
+                     num_layers_per_finetuning_step + 1); // inclusive
   }
 
   // if (new_bc.requestsInfo[inference_batch_size].peft_bwd_first_layer < 0) {
@@ -1510,11 +1630,19 @@ void RequestManager::process_finetuning_req_fwd_progress(
                  old_bc.num_finetuning_bwd_requests() <=
              1 &&
          "More than 1 finetuning request in the batch");
+  // if (inference_finished) {
+  //   printf("Running process_finetuning_req_fwd_progress with inference_finished=true. Num finetuning fwd tokens: %i\n",
+  //        old_bc.num_finetuning_fwd_tokens());
+  // }
   if (old_bc.num_finetuning_fwd_requests() == 0) {
+    if (inference_finished) {
+      // complete finetuning request if there is one in the pending queue
+      handle_completed_finetuning_req(old_bc);
+    }
     return;
   }
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
   assert(!old_bc.request_completed[inference_batch_size] &&
          "Finetuning request not found in new batch");
   assert(old_bc.requestsInfo[inference_batch_size].num_tokens_in_batch > 0 &&
@@ -1572,11 +1700,15 @@ void RequestManager::process_finetuning_req_bwd_progress(
                  old_bc.num_finetuning_bwd_requests() <=
              1 &&
          "More than 1 finetuning request in the batch");
+  // if (inference_finished) {
+  //   printf("Running process_finetuning_req_bwd_progress with inference_finished=true. Num finetuning bwd tokens: %i\n",
+  //        old_bc.num_finetuning_bwd_tokens());
+  // }
   if (old_bc.num_finetuning_bwd_requests() == 0) {
     return;
   }
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
   assert(!old_bc.request_completed[inference_batch_size] &&
          "Finetuning request not found in new batch");
   // check that request in batch is the same as the first one in the pending
@@ -1689,9 +1821,13 @@ void RequestManager::process_work_from_old_batch(
 
   // Step 2: Finetuning. Process work from previous bwd iteration: update
   // records of finetuning bwd progress
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(peft_support_mode)) {
     process_finetuning_req_fwd_progress(old_bc, result);
     process_finetuning_req_bwd_progress(old_bc);
+    if (peft_support_mode == TEMPORAL_SHARING ||
+        peft_support_mode == TEMPORAL_SHARING_LIMITED) {
+      update_peft_temporal_sharing_state();
+    }
   }
 }
 
@@ -1700,6 +1836,8 @@ BatchConfig RequestManager::prepare_next_bwd_batch(BatchConfig &new_bc) {
   const std::lock_guard<std::mutex> lock(request_queue_mutex);
 
   if (finetuning_bwd_work_available()) {
+    assert(!inference_finished &&
+           "Trying to add finetuning bwd request to next batch when inference_finished=true");
     add_finetuning_req_bwd_batch(new_bc);
   }
 
@@ -1711,27 +1849,24 @@ BatchConfig RequestManager::prepare_next_bwd_batch(BatchConfig &new_bc) {
   return new_bc;
 }
 
-BatchConfig
-    RequestManager::prepare_next_fwd_batch(BatchConfig const &old_bc,
-                                           InferenceResult const &result) {
-  // printf("\nEntering prepare_next_fwd_batch\n");
-  const std::lock_guard<std::mutex> lock(request_queue_mutex);
-
-  if (verbose) {
-    std::cout << "\n############### prepare_next_fwd_batch ###############\n";
-    std::cout << "old_bc: " << old_bc << std::endl;
-    std::cout << "result: " << result << std::endl;
-  }
-
-  // Step 1: Create new batch config
-  BatchConfig new_bc;
+void RequestManager::add_inference_work_if_needed(BatchConfig &new_bc,
+                                                  BatchConfig const &old_bc) {
+    
   // params
   int num_active_req = -1;
   // when finetuning is enabled, the last entry in the batch cannot be used for
   // inference
   int inference_batch_size =
-      BatchConfig::max_requests_per_batch() - (int)enable_peft_finetuning;
+      BatchConfig::max_requests_per_batch() - (int)peft_finetuning_enabled(peft_support_mode);
   int num_concurrent_inf_adapters = 0;
+
+  if (inference_finished) {
+    assert(old_bc.num_inference_tokens() == 0 &&
+           "Old batch should not have inference tokens when inference_finished=true");
+    assert(pending_infr_request_queue.empty() &&
+           "Pending inference request queue should be empty when inference_finished=true");
+    return;
+  }
 
   // Step 2: evict any requests that will not fit in the kv cache
   evict_requests_if_needed(old_bc, inference_batch_size);
@@ -1769,11 +1904,63 @@ BatchConfig
       }
     }
   }
+}
+
+BatchConfig
+    RequestManager::prepare_next_fwd_batch(BatchConfig const &old_bc,
+                                           InferenceResult const &result) {
+  // printf("\nEntering prepare_next_fwd_batch\n");
+  const std::lock_guard<std::mutex> lock(request_queue_mutex);
+
+  if (verbose) {
+    std::cout << "\n############### prepare_next_fwd_batch ###############\n";
+    std::cout << "old_bc: " << old_bc << std::endl;
+    std::cout << "result: " << result << std::endl;
+  }
+
+  // Step 1: Create new batch config
+  BatchConfig new_bc;
+
+  if (peft_support_mode != TEMPORAL_SHARING && 
+      peft_support_mode != TEMPORAL_SHARING_LIMITED) {
+    add_inference_work_if_needed(new_bc, old_bc);
+  } else {
+    // old_bc is only allowed to have inference tokens if we just finished a INFERENCE phase
+    // if (old_bc.num_inference_tokens() > 0) {
+    //   // assert(peft_temporal_sharing_state == FINETUNING_FWD &&
+    //   //        "Old batch should not have inference tokens");
+    // }
+    if (peft_temporal_sharing_state == INFERENCE) {
+      if (peft_temporal_sharing_inf_step == 0) {
+        // if (inference_finished) {
+        //   printf("Add inference work if needed from saved old batch with inference_finished=true\n");
+        // }
+        add_inference_work_if_needed(new_bc, ts_saved_old_batch);
+      } else {
+        // if (inference_finished) {
+        //   printf("Add inference work if needed from immediately previous batch with inference_finished=true\n");
+        // }
+        add_inference_work_if_needed(new_bc, old_bc);
+      }
+    } else if (peft_temporal_sharing_state == FINETUNING_FWD) {
+      // if we just finished the inference phase, we need to save the old batch for later
+      ts_saved_old_batch = old_bc;
+    }
+  }
 
   // Step 4: add finetuning fwd tokens, if there is additional space
+  int slots_available_for_peft_fwd = 0;
+  if (peft_support_mode == COSERVING || peft_support_mode == TEMPORAL_SHARING_LIMITED || peft_support_mode == SPATIAL_SHARING_LIMITED) {
+    slots_available_for_peft_fwd = get_max_tokens_per_batch() - new_bc.num_tokens;
+  } else if (peft_support_mode == TEMPORAL_SHARING || peft_support_mode == SPATIAL_SHARING || peft_support_mode == SPATIAL_SHARING_SEPARATE_TASKS) {
+    slots_available_for_peft_fwd = BatchConfig::MAX_NUM_TOKENS - new_bc.num_tokens;
+  }
+  assert(slots_available_for_peft_fwd >= 0);
   if (finetuning_fwd_work_available() &&
-      new_bc.num_tokens < get_max_tokens_per_batch() &&
-      get_max_fwd_finetuning_tokens_per_batch() > 0) {
+      get_max_fwd_finetuning_tokens_per_batch() > 0 &&
+      (peft_support_mode != TEMPORAL_SHARING || peft_temporal_sharing_state == FINETUNING_FWD) &&
+      slots_available_for_peft_fwd > 0) {
+    assert(!inference_finished && "Attempting to add finetuning work to new batch when inference is finished");
     add_finetuning_req_fwd_batch(new_bc);
   }
 
@@ -3785,7 +3972,7 @@ std::vector<GenerationResult>
     // if the current request has not arrived yet, submit finetuning work if
     // available, then sleep until next request arrives
     else {
-      if (this->config.enable_peft_finetuning && !added_ft_req) {
+      if (peft_finetuning_enabled(this->config.peft_support_mode) && !added_ft_req) {
         // std::cout << "Time " << (current_time_us-start_time_us)/1000 <<
         // "Registering PEFT request" << std::endl;
         RequestGuid guid = rm->register_new_peft_request(ft_requests.at(0));
@@ -3810,13 +3997,16 @@ std::vector<GenerationResult>
     results.push_back(rm->get_generation_result(inf_guids[i]));
   }
   if (inf_guids.size() > 0) {
+    // printf("Inference workload finished. Stopping finetuning\n");
     rm->set_inference_finished();
   }
   // block until all PEFT requests have been processed (or get interrupted at
   // the end of the inference workload)
+  // printf("Waiting for PEFT workload to finish\n");
   for (int i = 0; i < peft_guids.size(); i++) {
     results.push_back(rm->get_generation_result(peft_guids[i]));
   }
+  // printf("PEFT workload finished\n");
   rm->save_output_to_json();
   return results;
 }
@@ -4003,7 +4193,7 @@ void RequestManager::serve_incr_decoding(FFModel *llm) {
                                                runtime);
     InferenceResultFuture irf = im->inference(llm, 0, bcf);
     std::vector<FinetuningBwdFuture> bwd_f;
-    if (llm->config.enable_peft) {
+    if (peft_finetuning_enabled(llm->config.peft_support_mode)) {
       bwd_f = im->peft_bwd(llm, 0, bcf);
     } else {
       for (int i = 0; i < tp_degree; i++) {

@@ -33,7 +33,13 @@ def get_configs():
             raise FileNotFoundError(f"Config file {args.config_file} not found.")
         try:
             with open(args.config_file) as f:
-                return json.load(f)
+                config = json.load(f)
+            if "peft_support_mode" in config and isinstance(config["peft_support_mode"], str):
+                try:
+                    config["peft_support_mode"] = ff.PeftSupportMode[config["peft_support_mode"]]
+                except KeyError:
+                    raise ValueError(f"Invalid peft_support_mode value: {config['peft_support_mode']}")
+            return config
         except json.JSONDecodeError as e:
             print("JSON format error:")
             print(e)
@@ -54,7 +60,7 @@ def get_configs():
             "offload_reserve_space_size": 8 * 1024,  # 8GB
             "use_4bit_quantization": False,
             "use_8bit_quantization": False,
-            "enable_peft": False,
+            "peft_support_mode": ff.PeftSupportMode.PEFT_DISABLED,
             "profiling": False,
             "benchmarking": False,
             "inference_debugging": False,
@@ -81,8 +87,11 @@ def get_configs():
 
 
 def main():
+    print("FlexFlow LLM Inference Example (Incremental Decoding)")
     configs_dict = get_configs()
     configs = SimpleNamespace(**configs_dict)
+    print(configs_dict)
+    print(configs)
 
     # Initialize the FlexFlow runtime. ff.init() takes a dictionary or the path to a JSON file with the configs
     ff.init(configs_dict)

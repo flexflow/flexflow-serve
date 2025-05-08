@@ -84,6 +84,24 @@ enum RequestType {
   REQ_FINETUNING = 4002,
 };
 
+enum PeftSupportMode {
+  PEFT_DISABLED = 5001,
+  // no finetuning supported
+  PEFT_INFERENCE_ONLY = 5002,
+  // finetuning fwd limited by max tokens per batch, bwd layers limited to 1
+  COSERVING = 5003,
+  // finetuning fwd/bwd unlimited, alternating inference and finetuning batches
+  TEMPORAL_SHARING = 5004,
+  // finetuning fwd/bwd unlimited, inference and finetuning work in the same batch (different kernels)
+  SPATIAL_SHARING = 5005,
+  // finetuning fwd limited by max tokens per batch, bwd layers limited to 1. Inference and finetuning work in the same batch (different kernels)
+  SPATIAL_SHARING_LIMITED = 5006,
+  // finetuning fwd limited by max tokens per batch, bwd layers limited to 1. Alternating inference and finetuning batches
+  TEMPORAL_SHARING_LIMITED = 5007,
+  // finetuning fwd/bwd unlimited, inference and finetuning work in separate Legion tasks
+  SPATIAL_SHARING_SEPARATE_TASKS = 5008,
+};
+
 // This is consistent with TASO's OpType
 // https://github.com/jiazhihao/TASO/blob/master/include/taso/ops.h#L75-L138
 enum OperatorType {

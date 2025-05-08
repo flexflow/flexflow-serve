@@ -33,7 +33,13 @@ def get_configs():
             raise FileNotFoundError(f"Config file {args.config_file} not found.")
         try:
             with open(args.config_file) as f:
-                return json.load(f)
+                config = json.load(f)
+            if "peft_support_mode" in config and isinstance(config["peft_support_mode"], str):
+                try:
+                    config["peft_support_mode"] = ff.PeftSupportMode[config["peft_support_mode"]]
+                except KeyError:
+                    raise ValueError(f"Invalid peft_support_mode value: {config['peft_support_mode']}")
+            return config
         except json.JSONDecodeError as e:
             print("JSON format error:")
             print(e)
@@ -54,7 +60,7 @@ def get_configs():
             "offload_reserve_space_size": 8 * 1024,  # 8GB
             "use_4bit_quantization": False,
             "use_8bit_quantization": False,
-            "enable_peft": True,
+            "peft_support_mode": ff.PeftSupportMode.PEFT_INFERENCE_ONLY,
             "profiling": False,
             "inference_debugging": False,
             "fusion": False,
@@ -107,17 +113,20 @@ def main():
     generation_config = ff.GenerationConfig(
         do_sample=False, temperature=0.9, topp=0.8, topk=1
     )
-    enable_peft_finetuning = len(configs.finetuning_dataset) > 0
+    
+    if len(configs.finetuning_dataset) > 0:
+        configs.peft_support_mode = ff.PeftSupportMode.COSERVING
+        configs_dict["max_requests_per_batch"] = configs_dict.get("max_requests_per_batch", 1) + 1
+        configs_dict["max_concurrent_adapters"] = configs_dict.get("max_concurrent_adapters", 1) + 1
+
     llm.compile(
         generation_config,
-        max_requests_per_batch=configs_dict.get("max_requests_per_batch", 1)
-        + enable_peft_finetuning,
+        max_requests_per_batch=configs_dict.get("max_requests_per_batch", 1),
         max_seq_length=configs_dict.get("max_seq_length", 256),
         max_tokens_per_batch=configs_dict.get("max_tokens_per_batch", 128),
         num_kv_cache_slots=configs_dict.get("num_kv_cache_slots", -1),
-        max_concurrent_adapters=configs_dict.get("max_concurrent_adapters", 1)
-        + enable_peft_finetuning,
-        enable_peft_finetuning=enable_peft_finetuning,
+        max_concurrent_adapters=configs_dict.get("max_concurrent_adapters", 1),
+        peft_support_mode=configs.peft_support_mode,
     )
 
     llm.start_server()

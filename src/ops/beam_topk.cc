@@ -276,7 +276,6 @@ OpMeta *BeamTopK::init_task(Task const *task,
   BeamTopKMeta *m = new BeamTopKMeta(handle, topk, gpu_mem_allocator);
   m->profiling = topk->profiling;
   m->inference_debugging = topk->inference_debugging;
-  m->enable_peft_finetuning = topk->enable_peft_finetuning;
   std::strcpy(m->op_name, topk->name);
   m->layer_guid = topk->layer_guid;
   m->sorted = topk->sorted;

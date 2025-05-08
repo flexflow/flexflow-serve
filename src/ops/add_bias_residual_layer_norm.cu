@@ -35,14 +35,12 @@ AddBiasResidualLayerNormMeta::AddBiasResidualLayerNormMeta(
   effective_num_elements = ln->effective_num_elements;
   profiling = ln->profiling;
   inference_debugging = ln->inference_debugging;
-  enable_peft_finetuning = ln->enable_peft_finetuning;
   eps = ln->eps;
   DataType data_type = ln->data_type;
   size_t in_dim = ln->inputs[0]->dims[0].size / ln->inputs[0]->dims[0].degree;
   allocated_peft_buffer_size =
-      enable_peft_finetuning ? (data_type_size(data_type) *
-                                BatchConfig::max_sequence_length() * in_dim)
-                             : 0;
+      peft_finetuning_enabled(peft_support_mode) ? (data_type_size(data_type) * BatchConfig::max_sequence_length() * in_dim)
+                                                  : 0;
   size_t totalSize = effective_batch_size * data_type_size(data_type) * 3 +
                      allocated_peft_buffer_size;
 
@@ -54,7 +52,7 @@ AddBiasResidualLayerNormMeta::AddBiasResidualLayerNormMeta(
       data_type_size(data_type) * effective_batch_size);
   bias_ptr = gpu_mem_allocator.allocate_instance_untyped(
       data_type_size(data_type) * effective_batch_size);
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(peft_support_mode)) {
     input_activation =
         gpu_mem_allocator.allocate_instance_untyped(allocated_peft_buffer_size);
   }

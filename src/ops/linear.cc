@@ -623,7 +623,7 @@ void Linear::inference_task(Task const *task,
   assert((weight.domain.hi()[1] - weight.domain.lo()[1] + 1) == out_dim);
   assert(weight.domain.get_volume() == in_dim * out_dim);
 
-  int batch_size = bc->num_active_tokens();
+  // int batch_size = bc->num_active_tokens();
   GenericTensorAccessorR bias;
   if (m->use_bias &&
       !(m->add_bias_only_once && task->index_point.point_data[0] != 0)) {
@@ -642,8 +642,7 @@ void Linear::inference_task(Task const *task,
                            weight.ptr,
                            bias.ptr,
                            in_dim,
-                           out_dim,
-                           batch_size);
+                           out_dim);
   if (m->inference_debugging) {
     assert(task->index_point.get_dim() == 1);
     int shard_id = task->index_point.point_data[0];

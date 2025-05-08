@@ -50,7 +50,7 @@ run_cpp_inference() {
     ["offload_reserve_space_size"]="-offload-reserve-space-size"
     ["use_4bit_quantization"]="--4bit-quantization"
     ["use_8bit_quantization"]="--8bit-quantization"
-    ["enable_peft"]="-enable-peft"
+    ["peft_support_mode"]="--peft_support_mode"
     ["profiling"]="--profiling"
     ["benchmarking"]="--benchmarking"
     ["inference_debugging"]="--inference-debugging"

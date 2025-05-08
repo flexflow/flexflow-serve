@@ -471,7 +471,7 @@ class LLM:
         max_tokens_per_batch: int = 64,
         num_kv_cache_slots: int = -1,
         max_concurrent_adapters: int = 1,
-        enable_peft_finetuning: bool = False,
+        peft_support_mode: PeftSupportMode = PeftSupportMode.PEFT_DISABLED,
         num_bwd_layers_per_ft_step: int = -1,
         ssms: list = [],
     ):
@@ -489,8 +489,8 @@ class LLM:
         :type num_kv_cache_slots: int, optional
         :param max_concurrent_adapters: The maximum number of concurrent LoRA adapters, defaults to 1
         :type max_concurrent_adapters: int, optional
-        :param enable_peft_finetuning: Whether to enable support for PEFT fine-tuning, defaults to False
-        :type enable_peft_finetuning: bool, optional
+        :param peft_support_mode: The PEFT support mode to use, defaults to PeftSupportMode.PEFT_DISABLED
+        :type peft_support_mode: PeftSupportMode, optional
         :param num_bwd_layers_per_ft_step: The number of backward layers to run per finetuning step, defaults to -1 (i.e. all layers)
         :type num_bwd_layers_per_ft_step: int, optional
         :param ssms: The SSMs to use when operating in speculative inference mode, defaults to []
@@ -514,7 +514,7 @@ class LLM:
         self.max_spec_tree_token_num = 20
 
         self.max_seq_length = max_seq_length
-        self.ffconfig.enable_peft_finetuning = enable_peft_finetuning
+        self.ffconfig.peft_support_mode = peft_support_mode
         self.num_kv_cache_slots = num_kv_cache_slots
         if num_kv_cache_slots < 0:
             if is_spec:
@@ -531,7 +531,7 @@ class LLM:
         self.rm.set_max_spec_tree_token_num(self.max_spec_tree_token_num)
         self.rm.set_max_sequence_length(max_seq_length)
         self.rm.set_max_concurrent_adapters(max_concurrent_adapters)
-        self.rm.set_enable_peft_finetuning(enable_peft_finetuning)
+        self.rm.set_peft_support_mode(peft_support_mode)
         self.rm.set_num_transformers_layers(self.hf_config.num_hidden_layers)
         if num_bwd_layers_per_ft_step != -1:
             self.rm.set_num_layers_per_finetuning_step(num_bwd_layers_per_ft_step)
@@ -805,7 +805,7 @@ class SSM(LLM):
         max_tokens_per_batch: int = 2048,
         num_kv_cache_slots: int = -1,
         max_concurrent_adapters: int = 1,
-        enable_peft_finetuning: bool = False,
+        peft_support_mode: PeftSupportMode = PeftSupportMode.PEFT_DISABLED,
         num_bwd_layers_per_ft_step: int = -1,
         ssms: list = [],
     ):
@@ -822,8 +822,8 @@ class SSM(LLM):
         :type num_kv_cache_slots: int, optional
         :param max_concurrent_adapters: The maximum number of concurrent LoRA adapters, defaults to 1
         :type max_concurrent_adapters: int, optional
-        :param enable_peft_finetuning: Whether to enable support for PEFT fine-tuning, defaults to False
-        :type enable_peft_finetuning: bool, optional
+        :param peft_support_mode: The PEFT support mode to use, defaults to PeftSupportMode.PEFT_DISABLED
+        :type peft_support_mode: PeftSupportMode, optional
         :param num_bwd_layers_per_ft_step: The number of backward layers to run per finetuning step, defaults to -1 (i.e. all layers)
         :type num_bwd_layers_per_ft_step: int, optional
         :param ssms: The SSMs to use when operating in speculative inference mode, defaults to []
@@ -836,7 +836,7 @@ class SSM(LLM):
             max_tokens_per_batch,
             num_kv_cache_slots,
             max_concurrent_adapters,
-            enable_peft_finetuning,
+            peft_support_mode,
             num_bwd_layers_per_ft_step,
             ssms,
         )

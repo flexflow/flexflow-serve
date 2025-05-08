@@ -200,7 +200,7 @@ public:
   Op(int guid,
      bool profiling,
      bool inference_debugging,
-     bool enable_peft_finetuning,
+     PeftSupportMode peft_support_mode,
      OperatorType otype,
      DataType dtype,
      char const *name,
@@ -474,7 +474,7 @@ public:
   int numInputs, numWeights, numOutputs;
   bool profiling;
   bool inference_debugging;
-  bool enable_peft_finetuning;
+  PeftSupportMode peft_support_mode;
   bool add_bias_only_once;
 #ifdef FF_USE_NCCL
   ncclUniqueId ncclId;

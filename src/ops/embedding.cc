@@ -411,7 +411,6 @@ OpMeta *Embedding::init_task(Task const *task,
   EmbeddingMeta *m = new EmbeddingMeta(handle, embed);
   m->profiling = embed->profiling;
   m->inference_debugging = embed->inference_debugging;
-  m->enable_peft_finetuning = embed->enable_peft_finetuning;
   m->aggr = embed->aggr;
   std::strcpy(m->op_name, embed->name);
   m->layer_guid = embed->layer_guid;
@@ -562,24 +561,16 @@ void Embedding::inference_task(Task const *task,
            output.domain.hi()[0] - output.domain.lo()[0]);
   }
 
-  int in_dim, out_dim, effective_batch_size;
+  int in_dim, out_dim;
   if (m->aggr == AGGR_MODE_NONE) {
     in_dim = 1;
     out_dim = output.domain.hi()[0] - output.domain.lo()[0] + 1;
-    // effective_batch_size = output.domain.get_volume() / out_dim;
-    effective_batch_size =
-        bc->num_active_tokens(); // use num_active_tokens for inference
-    assert(effective_batch_size * in_dim <= input.domain.get_volume());
   } else {
     in_dim = input.domain.hi()[0] - input.domain.lo()[0] + 1;
     out_dim = output.domain.hi()[0] - output.domain.lo()[0] + 1;
-    // effective_batch_size = output.domain.get_volume() / out_dim;
-    effective_batch_size =
-        bc->num_active_tokens(); // use num_active_tokens for inference
-    assert(effective_batch_size * in_dim <= input.domain.get_volume());
   }
-  forward_kernel_wrapper(
-      m, input, output, kernel, in_dim, out_dim, effective_batch_size);
+  inference_kernel_wrapper(
+      m, bc, input, output, kernel, in_dim, out_dim);
   if (m->inference_debugging) {
     assert(task->index_point.get_dim() == 1);
     int shard_id = task->index_point.point_data[0];

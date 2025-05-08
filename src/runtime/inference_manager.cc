@@ -302,6 +302,17 @@ void InferenceManager::compile_model_and_allocate_buffer(FFModel *model) {
     }
     assert(model->check_operators_integrity(old_operators, &tensor_buffer));
     fprintf(stderr, "%zu operators after fusion...\n", model->operators.size());
+    for (size_t i = 0; i < model->operators.size(); i++) {
+      Op *op = model->operators[i];
+      if (op->op_type == OP_INPUT || op->op_type == OP_WEIGHT) {
+        continue;
+      }
+      fprintf(stderr,
+          "operator[%zu]: type(%s) guid(%lu)\n",
+          i,
+          get_operator_type_name(model->operators[i]->op_type).c_str(),
+          model->operators[i]->op_guid);
+    }
   }
 
   // print optimized graph

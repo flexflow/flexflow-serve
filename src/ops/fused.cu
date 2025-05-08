@@ -234,7 +234,6 @@ __host__ void
         }
         assert(m->input_type[0] == my_input_accessor[0].data_type);
         assert(m->input_type[0] == my_output_accessor[0].data_type);
-        batch_size = bc->num_active_tokens();
         Kernels::Linear::inference_kernel_wrapper(m,
                                                   bc,
                                                   my_input_accessor[0].ptr,
@@ -242,8 +241,7 @@ __host__ void
                                                   my_weight_accessor[0].ptr,
                                                   bias_ptr,
                                                   in_dim,
-                                                  out_dim,
-                                                  batch_size);
+                                                  out_dim);
         break;
       }
       case OP_LORA: {
@@ -356,38 +354,26 @@ __host__ void
                  my_output_accessor[0].domain.hi()[0] -
                      my_output_accessor[0].domain.lo()[0]);
         }
-        int in_dim, out_dim, effective_batch_size;
+        int in_dim, out_dim;
         if (m->aggr == AGGR_MODE_NONE) {
           in_dim = 1;
           out_dim = my_output_accessor[0].domain.hi()[0] -
                     my_output_accessor[0].domain.lo()[0] + 1;
-          // effective_batch_size =
-          //     my_output_accessor[0].domain.get_volume() / out_dim;
-          effective_batch_size = bc->num_active_tokens();
-          assert(effective_batch_size * in_dim <=
-                 my_input_accessor[0].domain.get_volume());
         } else {
           assert(m->aggr == AGGR_MODE_AVG || m->aggr == AGGR_MODE_SUM);
           in_dim = my_input_accessor[0].domain.hi()[0] -
                    my_input_accessor[0].domain.lo()[0] + 1;
           out_dim = my_output_accessor[0].domain.hi()[0] -
                     my_output_accessor[0].domain.lo()[0] + 1;
-          // effective_batch_size =
-          //     my_output_accessor[0].domain.get_volume() / out_dim;
-          effective_batch_size = bc->num_active_tokens();
-          assert(effective_batch_size * in_dim <=
-                 my_input_accessor[0].domain.get_volume());
         }
-
         assert(my_input_accessor[0].data_type == DT_INT32 ||
                my_input_accessor[0].data_type == DT_INT64);
-        Kernels::Embedding::forward_kernel_wrapper(m,
-                                                   my_input_accessor[0],
-                                                   my_output_accessor[0],
-                                                   my_weight_accessor[0],
-                                                   in_dim,
-                                                   out_dim,
-                                                   effective_batch_size);
+        Kernels::Embedding::inference_kernel_wrapper(m, bc,
+                                                    my_input_accessor[0],
+                                                    my_output_accessor[0],
+                                                    my_weight_accessor[0],
+                                                    in_dim,
+                                                    out_dim);
         break;
       }
       case OP_GELU:
@@ -748,10 +734,10 @@ __host__ bool FusedOp::peft_bwd_task(Task const *task,
     if (metas->meta[op] != NULL) {
       assert(metas->meta[start]->handle.blas == metas->meta[op]->handle.blas);
       assert(metas->meta[start]->handle.dnn == metas->meta[op]->handle.dnn);
-      assert(metas->meta[start]->handle.peft_blas ==
-             metas->meta[op]->handle.peft_blas);
-      assert(metas->meta[start]->handle.peft_dnn ==
-             metas->meta[op]->handle.peft_dnn);
+      assert(metas->meta[start]->handle.peft_bwd_blas ==
+             metas->meta[op]->handle.peft_bwd_blas);
+      assert(metas->meta[start]->handle.peft_bwd_dnn ==
+             metas->meta[op]->handle.peft_bwd_dnn);
     }
   }
 

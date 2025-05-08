@@ -370,7 +370,7 @@ __host__ void
 
         assert(my_input_accessor[0].data_type == DT_INT32 ||
                my_input_accessor[0].data_type == DT_INT64);
-        Kernels::Embedding::forward_kernel_wrapper(m,
+        Kernels::Embedding::inference_kernel_wrapper(m,
                                                    my_input_accessor[0],
                                                    my_output_accessor[0],
                                                    my_weight_accessor[0],

@@ -278,7 +278,6 @@ OpMeta *ArgTopK::init_task(Task const *task,
   ArgTopKMeta *m = new ArgTopKMeta(handle, topk);
   m->profiling = topk->profiling;
   m->inference_debugging = topk->inference_debugging;
-  m->enable_peft_finetuning = topk->enable_peft_finetuning;
   m->sorted = topk->sorted;
   m->k = topk->k;
   std::strcpy(m->op_name, topk->name);

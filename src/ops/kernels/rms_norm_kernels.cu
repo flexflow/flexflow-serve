@@ -34,7 +34,7 @@ RMSNormMeta::RMSNormMeta(FFHandler handler,
   size_t data_size = data_type_size(rms->weights[0]->data_type);
 
   size_t rms_ptr_size = rms->effective_batch_size * data_size;
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(peft_support_mode)) {
     allocated_peft_buffer_size =
         BatchConfig::max_sequence_length() * in_dim * data_size;
   } else {
@@ -45,7 +45,7 @@ RMSNormMeta::RMSNormMeta(FFHandler handler,
   gpu_mem_allocator.create_legion_instance(
       reserveInst, totalSize, "RMSNormMeta");
   rms_ptr = gpu_mem_allocator.allocate_instance_untyped(rms_ptr_size);
-  if (enable_peft_finetuning) {
+  if (peft_finetuning_enabled(peft_support_mode)) {
     input_activation =
         gpu_mem_allocator.allocate_instance_untyped(allocated_peft_buffer_size);
   }
@@ -142,13 +142,59 @@ __global__ void RMSNormFusedForwardKernel(int64_t data_dim,
 }
 
 template <typename T>
+void inference_kernel_spatial_sharing(RMSNormMeta const *m,
+                                      BatchConfig const *bc,
+                                      T const *input_ptr,
+                                      T const *weight_ptr,
+                                      T *output_ptr,
+                                      cudaStream_t main_stream) {
+  // launch finetuning fwd tokens kernel if there are any finetuning fwd tokens
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_can_start, main_stream)); 
+    checkCUDA(cudaStreamWaitEvent(m->handle.peft_fwd_stream, m->handle.peft_fwd_can_start, 0));
+
+    RMSNormFusedForwardKernel<T>
+        <<<bc->num_finetuning_fwd_tokens(), std::min(CUDA_NUM_THREADS, m->in_dim), 0, m->handle.peft_fwd_stream>>>(
+            m->in_dim,
+            m->eps,
+            input_ptr + m->in_dim * bc->num_inference_tokens(),
+            static_cast<float *>(m->rms_ptr) + bc->requestsInfo[bc->finetuning_request_index()].first_token_depth_in_request,
+            0 /*first_ft_token_idx*/, 
+            weight_ptr,
+            output_ptr + m->in_dim * bc->num_inference_tokens());
+
+    checkCUDA(cudaEventRecord(m->handle.peft_fwd_done, m->handle.peft_fwd_stream));
+  }
+
+  // launch inference kernel if there are inference tokens
+  if (bc->num_inference_tokens() > 0) {
+    RMSNormFusedForwardKernel<T>
+        <<<bc->num_inference_tokens(), std::min(CUDA_NUM_THREADS, m->in_dim), 0, main_stream>>>(
+            m->in_dim,
+            m->eps,
+            input_ptr,
+            nullptr /*rms_ptr*/,
+            bc->num_inference_tokens() /*first_ft_token_idx*/, 
+            weight_ptr,
+            output_ptr);
+  }
+
+  if (bc->num_finetuning_fwd_tokens() > 0) {
+    checkCUDA(cudaStreamWaitEvent(main_stream, m->handle.peft_fwd_done, 0));
+  }
+}
+
+template <typename T>
 void inference_kernel(RMSNormMeta const *m,
                       BatchConfig const *bc,
                       T const *input_ptr,
                       T const *weight_ptr,
                       T *output_ptr,
                       cudaStream_t stream) {
-
+  if (m->peft_support_mode == SPATIAL_SHARING || m->peft_support_mode == SPATIAL_SHARING_LIMITED) {
+    inference_kernel_spatial_sharing(m, bc, input_ptr, weight_ptr, output_ptr, stream);
+    return;
+  }
   int num_tokens = bc->num_active_tokens();
   int data_dim = m->in_dim;
   if (num_tokens <= 0) {
@@ -188,7 +234,7 @@ void store_peft_activations(RMSNormMeta const *m,
                             size_t in_dim,
                             DT const *input_ptr,
                             cudaStream_t stream) {
-  assert(m->enable_peft_finetuning);
+  assert(peft_finetuning_enabled(m->peft_support_mode));
   assert(bc->num_finetuning_fwd_tokens() >= 1);
 
   int num_ft_tokens = bc->num_finetuning_fwd_tokens();

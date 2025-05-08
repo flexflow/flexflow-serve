@@ -33,6 +33,9 @@ from flexflow.type import (
     ModelType,
     OpType,
     ParameterSyncType,
+    PeftSupportMode,
+    peft_finetuning_enabled,
+    peft_enabled,
     enum_to_int,
     int_to_enum,
     data_type_size,
@@ -814,20 +817,19 @@ class FFConfig(object):
         return ffc().flexflow_config_get_python_data_loader_type(self.handle)
 
     @property
-    def enable_peft(self):
-        return ffc().flexflow_config_get_enable_peft(self.handle)
+    def peft_support_mode(self):
+        c_peft_support_mode = ffc().flexflow_config_get_peft_support_mode(self.handle)
+        return int_to_enum(PeftSupportMode, c_peft_support_mode)
 
-    @property
-    def enable_peft_finetuning(self):
-        return ffc().flexflow_config_get_enable_peft_finetuning(self.handle)
 
-    @enable_peft_finetuning.setter
-    def enable_peft_finetuning(self, value):
-        if type(value) is not bool:
+    @peft_support_mode.setter
+    def peft_support_mode(self, value: PeftSupportMode):
+        if not isinstance(value, PeftSupportMode):
             raise ValueError(
-                "enable_peft_finetuning must be specified as a boolean value"
+                "peft_support_mode must be one of the valid options: {}".format(list(PeftSupportMode))
             )
-        ffc().flexflow_config_set_enable_peft_finetuning(self.handle, value)
+        c_peft_support_mode = enum_to_int(PeftSupportMode, value)
+        ffc().flexflow_config_set_peft_support_mode(self.handle, c_peft_support_mode)
 
     @property
     def cpu_offload(self):
@@ -1644,7 +1646,7 @@ class RequestManager(object):
 
     # Max requests per batch
     def set_max_requests_per_batch(self, max_requests):
-        return ffc().flexflow_request_manager_set_max_requests_per_batch(
+        ffc().flexflow_request_manager_set_max_requests_per_batch(
             self.handle, max_requests
         )
 
@@ -1653,7 +1655,7 @@ class RequestManager(object):
 
     # Max tokens per batch
     def set_max_tokens_per_batch(self, max_tokens):
-        return ffc().flexflow_request_manager_set_max_tokens_per_batch(
+        ffc().flexflow_request_manager_set_max_tokens_per_batch(
             self.handle, max_tokens
         )
 
@@ -1662,7 +1664,7 @@ class RequestManager(object):
 
     # Max spec tree token num
     def set_max_spec_tree_token_num(self, max_tokens):
-        return ffc().flexflow_request_manager_set_max_spec_tree_token_num(
+        ffc().flexflow_request_manager_set_max_spec_tree_token_num(
             self.handle, max_tokens
         )
 
@@ -1677,7 +1679,7 @@ class RequestManager(object):
 
     # Max sequence length
     def set_max_sequence_length(self, max_length):
-        return ffc().flexflow_request_manager_set_max_sequence_length(
+        ffc().flexflow_request_manager_set_max_sequence_length(
             self.handle, max_length
         )
 
@@ -1686,25 +1688,28 @@ class RequestManager(object):
 
     # Num transformer layers
     def set_num_transformers_layers(self, num_layers):
-        return ffc().flexflow_request_manager_set_num_transformers_layers(
+        ffc().flexflow_request_manager_set_num_transformers_layers(
             self.handle, num_layers
         )
 
     # Num layers per finetuning steps
     def set_num_layers_per_finetuning_step(self, num_layers):
-        return ffc().flexflow_request_manager_set_num_layers_per_finetuning_step(
+        ffc().flexflow_request_manager_set_num_layers_per_finetuning_step(
             self.handle, num_layers
         )
 
     def set_max_concurrent_adapters(self, max_adapters):
-        return ffc().flexflow_request_manager_set_max_concurrent_adapters(
+        ffc().flexflow_request_manager_set_max_concurrent_adapters(
             self.handle, max_adapters
         )
 
-    def set_enable_peft_finetuning(self, enable_peft_finetuning):
-        return ffc().flexflow_request_manager_set_enable_peft_finetuning(
-            self.handle, enable_peft_finetuning
-        )
+    def set_peft_support_mode(self, value: PeftSupportMode):
+        if not isinstance(value, PeftSupportMode):
+            raise ValueError(
+                "peft_support_mode must be one of the valid options: {}".format(list(PeftSupportMode))
+            )
+        c_peft_support_mode = enum_to_int(PeftSupportMode, value)
+        ffc().flexflow_request_manager_set_peft_support_mode(self.handle, c_peft_support_mode)
 
     def start_server(self, model):
         return ffc().flexflow_request_manager_start_background_server(
